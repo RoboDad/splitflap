@@ -25,3 +25,7 @@ sensor.xml
 .vscode
 .nvmrc
 .python_version
+
+# PVV CAD rendered/exported outputs
+pvv_cad/*.stl
+pvv_cad/*.3mf
