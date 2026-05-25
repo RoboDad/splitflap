@@ -10,6 +10,16 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Location of the pre-rendered Epilogue per-character flap SVGs (see
+# pvv_tools/generate_epilogue_flap_svgs.py).  These are bundled with the
+# repository and resolved relative to this package's parent directory so
+# the "epilogue" flap type works regardless of the job config's location.
+_EPILOGUE_ASSETS_DIR = Path(__file__).resolve().parent.parent / 'assets' / 'epilogue_flaps'
+
+# Must stay in sync with 3d/flap_characters.scad and the CHARACTER_LIST
+# in pvv_tools/generate_epilogue_flap_svgs.py.
+_EPILOGUE_CHARACTER_LIST = " ABCDEFGHIJKLMNOPQRSTUVWXYZg0123456789r.?-$'#yp,!@&w"
+
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -199,6 +209,33 @@ def load_config(path: str | Path) -> JobConfig:
             raise ValueError(f"custom_flaps[{i}]: 'slot' is required")
 
         flap_type = cf.get('type', 'single')
+
+        # The "epilogue" type is a convenience shorthand for "single" with
+        # one of the pre-rendered Epilogue per-character SVGs from
+        # pvv_tools/assets/epilogue_flaps/.  We resolve it here and then
+        # behave exactly like a "single" SVG from this point on.
+        if flap_type == 'epilogue':
+            ep_index = cf.get('index')
+            ep_char = cf.get('char')
+            if (ep_index is None) == (ep_char is None):
+                raise ValueError(
+                    f"custom_flaps[{i}]: type 'epilogue' requires exactly one "
+                    f"of 'index' (0-{len(_EPILOGUE_CHARACTER_LIST) - 1}) or 'char'")
+            if ep_char is not None:
+                if len(ep_char) != 1 or ep_char not in _EPILOGUE_CHARACTER_LIST:
+                    raise ValueError(
+                        f"custom_flaps[{i}]: 'char' {ep_char!r} is not in the "
+                        f"Epilogue character set {_EPILOGUE_CHARACTER_LIST!r}")
+                ep_index = _EPILOGUE_CHARACTER_LIST.index(ep_char)
+            if not (0 <= ep_index < len(_EPILOGUE_CHARACTER_LIST)):
+                raise ValueError(
+                    f"custom_flaps[{i}]: 'index' {ep_index} out of range "
+                    f"[0, {len(_EPILOGUE_CHARACTER_LIST) - 1}]")
+            cf['source'] = str(_EPILOGUE_ASSETS_DIR / f'flap_{ep_index:02d}.svg')
+            flap_type = 'single'
+            if 'label' not in cf:
+                ep_char_resolved = _EPILOGUE_CHARACTER_LIST[ep_index]
+                cf['label'] = f"EP-{ep_char_resolved!r}" if ep_char_resolved.strip() else "EP-SP"
 
         # 'source' is required for non-blank types
         source_str: Optional[str] = cf.get('source')

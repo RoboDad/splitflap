@@ -112,9 +112,11 @@ An array of objects, one per custom flap. Required fields: `slot`, `source`.
 |-----|------|---------|-------------|
 | `slot` | int | *required* | 0-based index in the custom flap sequence |
 | `label` | string | `"EP{slot+42}"` | Display label (e.g. `"EP42"`) |
-| `source` | string | *required* | Image path, relative to the JSON config file's directory |
-| `type` | string | `"single"` | `"single"` (one module) or `"multi-module"` (spans multiple) |
+| `source` | string | *required* (except `blank`/`epilogue`) | Image path (PNG/JPEG/SVG), relative to the JSON config file's directory |
+| `type` | string | `"single"` | `"single"`, `"multi-module"`, `"blank"`, or `"epilogue"` (see [Custom Flap Types](#custom-flap-types)) |
 | `module_range` | [int, int] | `null` | Required for `multi-module`: inclusive range `[start, end]` |
+| `index` | int | `null` | Required for `epilogue` if `char` is not given; 0-based index into the standard 52-flap character set |
+| `char` | string | `null` | Required for `epilogue` if `index` is not given; single character from the standard 52-flap set |
 | `scale` | [float, float] | `null` | Per-image scale override `[sx, sy]`; `null` = use global |
 | `crop` | [L, T, R, B] | `null` | Per-image crop override `[left%, top%, right%, bottom%]`; `null` = use global |
 | `fit_mode` | string | `null` | Per-image fit mode override; `null` = use global default |
@@ -192,10 +194,37 @@ image is fit to the physical target size using the active `fit_mode`.
 
 ### Custom Flap Types
 
-- **`single`**: One image per flap. Same output for all modules.
+- **`single`**: One image per flap. Same output for all modules. Source may
+  be a raster (PNG/JPEG) or an `.svg` file (see [SVG Inputs](#svg-inputs)).
 - **`multi-module`**: Image spans multiple modules (e.g., triptych).
   Requires `module_range: [start, end]` (inclusive). The tool extracts
-  the correct column for each module automatically.
+  the correct column for each module automatically. Raster or SVG.
+- **`blank`**: Fully transparent top/bottom halves. No source required.
+- **`epilogue`**: Shorthand for `single` using one of the bundled
+  pre-rendered Epilogue-font flap SVGs (the standard 52-character set
+  from Scott Bezek's splitflap project — A-Z, 0-9, space, punctuation).
+  Specify the character via either `char` (e.g. `"H"`) or `index`
+  (0–51). No `source` field needed; the tool resolves to
+  `pvv_tools/assets/epilogue_flaps/flap_NN.svg`. Example:
+
+  ```json
+  {"slot": 0, "type": "epilogue", "char": "H"},
+  {"slot": 1, "type": "epilogue", "index": 5}
+  ```
+
+### SVG Inputs
+
+Any `single` or `multi-module` source whose path ends in `.svg` is
+rasterized via `resvg-py` before entering the image pipeline.  SVGs are
+treated identically to raster inputs once loaded:
+
+- The SVG's full viewBox is interpreted as the full display face
+  (`flap_width` x `display_height` for `single`; full span width x
+  `display_height` for `multi-module`).
+- Rasterization uses 2x supersampling by default for clean edges, then
+  is resampled down by the standard `fit_mode` pipeline.
+- Unit-bearing SVGs (`width="54mm"` etc.) are supported; resvg honours
+  the embedded units.
 
 ### Bleed Margin
 
@@ -303,3 +332,143 @@ PNGs include DPI metadata so image editors show correct physical size.
 ## Dependencies
 
 - **Pillow** ≥ 10.0 (MIT-like license)
+- **resvg-py** ≥ 0.3 (MPL-2.0) — used to rasterize SVG sources
+
+---
+
+## Details
+
+Programmer-facing notes on internals.  Read this if you intend to modify
+the pipeline; the sections above are sufficient for ordinary use.
+
+### Package layout
+
+```
+pvv_tools/
+  flap_printer/         # Main package; entry point is __main__.py
+    cli.py              # Argparse + top-level orchestration
+    config.py           # JSON loader + dataclasses + validation
+    dimensions.py       # FlapDimensions / JigDimensions / DisplayDimensions
+    scad_parser.py      # OpenSCAD subprocess + echo-output parsing + cache
+    svg_loader.py       # is_svg() + load_svg() (resvg-py wrapper)
+    slicer.py           # apply_transforms, fit_to_target, slice_display_image,
+                        # extract_module_column
+    layout.py           # FlapSide, batch grouping, jig flip, ink-save mask
+    labels.py           # EP label rendering
+    renderer.py         # Pipeline orchestrator (load -> slice -> layout -> save)
+  scad/
+    epilogue_flap_single.scad   # SCAD wrapper used by the Epilogue generator
+  assets/
+    epilogue_flaps/             # Pre-rendered flap_NN.svg + index.json
+  generate_epilogue_flap_svgs.py  # CLI that regenerates assets/epilogue_flaps/
+  example_job.json
+```
+
+### Pipeline walkthrough (raster + SVG)
+
+1. **Config load** (`config.load_config`) parses JSON, resolves `source`
+   paths relative to the config file's directory, validates `fit_mode` /
+   `flip_mode`, and expands `epilogue` shorthand into `single` + an
+   absolute path under `assets/epilogue_flaps/`.
+2. **Dimension resolution** (`dimensions.AllDimensions.resolve`) tries
+   OpenSCAD first (via `scad_parser.run_openscad`, which spawns OpenSCAD
+   with `PVV_splitflap_mods.scad`, parses `FLAP_PRINTER: key=value` echoes,
+   and caches to `.flap_printer_dims.json` keyed by SCAD mtime), then
+   falls back to `dimensions` overrides in the config, then hardcoded
+   defaults.
+3. **Per-module flap resolution** (`renderer._resolve_flaps_for_module`)
+   iterates `custom_flaps` and, for each entry:
+   1. Calls `_load_source_image(flap_cfg, target_h)` which dispatches on
+      file extension: SVG -> `svg_loader.load_svg`, otherwise PIL `open`.
+   2. Applies per-image or global `scale` / `crop` (`slicer.apply_transforms`).
+   3. Resizes to the canonical display-face size via
+      `slicer.fit_to_target` using the active `fit_mode`.
+   4. Slices into top/bottom halves with `slicer.slice_display_image`
+      (top `flap_height` mm, skip `flap_gap` mm, then `flap_height` mm).
+   5. For `multi-module`, the full multi-flap image is fit to the
+      combined span first (`module_pitch * num_span - inter_module_gap`),
+      then `slicer.extract_module_column` cuts out this module's column,
+      which is then re-fit to a single flap before slicing.
+4. **Flap-side mapping** (`layout.map_images_to_flap_sides`): Flap K's
+   front is `top(K)`, its back is `bottom(K+1)`; the last back is blank.
+5. **Batch grouping** + **layout** (`layout.generate_batch_image`):
+   slots are grouped into jig-sized batches (`jig_num_x * jig_num_y`).
+   Each slot's flap image is pasted onto a transparent
+   `printable_width x printable_height` canvas at the precomputed pocket
+   position; the paste is **upscaled by `2 * bleed_mm`** so the bleed
+   zone is filled with real content.
+6. **Jig flip** (`layout.apply_flip_transform` / `reorder_for_jig_flip`):
+   When the operator flips the laser-cut jig (left-right or front-back)
+   to print the back side, the flaps remain physically in place but their
+   grid coordinates change. This step reorders only the *grid mapping*
+   (no per-image mirroring) so the back-side composite aligns with the
+   flipped jig.
+7. **Ink-save mask** (`layout.apply_ink_save_mask`): zeros alpha
+   everywhere outside `pocket + bleed_mm` to avoid printing on the jig.
+8. **Labels** (`labels.render_labels`): EP labels in the gap rows.
+9. **Save**: PNG with embedded DPI metadata (`info['dpi']`) so editors
+   show physical mm.
+
+### SVG loader (`svg_loader.py`)
+
+Thin wrapper around `resvg_py.svg_to_bytes`:
+
+- `is_svg(path)` is a `.svg` suffix check (case-insensitive).
+- `load_svg(svg_path, target_height_px, supersample=2.0)` calls resvg with
+  `svg_path=`, computes width preserving the SVG aspect ratio at
+  `supersample * target_height_px`, and sets `dpi=96` (any non-zero value)
+  so resvg correctly interprets real-world units like `width="54mm"`.
+- Returns a PIL `Image` (RGBA).  The downstream pipeline owns all further
+  resizing, so the supersampled raster only exists transiently.
+- `resvg_py` is imported lazily so installs that never use SVG inputs do
+  not pay the import cost.
+
+### Epilogue generator (`generate_epilogue_flap_svgs.py`)
+
+This script regenerates `assets/epilogue_flaps/flap_NN.svg`.  It is **not**
+run by the flap_printer at runtime — the SVGs are committed to the repo.
+Run it manually after editing the SCAD wrapper or switching fonts.
+
+For each of the 52 characters it:
+
+1. Adds Scott Bezek's `3d/scripts/` to `sys.path` and imports
+   `projection_renderer.Renderer` and `svg_processor.SvgProcessor`.
+2. Invokes the renderer on `pvv_tools/scad/epilogue_flap_single.scad`
+   with `flap_index=N` (the character's index in the standard 52-flap
+   list, mirroring `3d/flap_characters.scad`).
+3. The SCAD wrapper calls `flap_with_letters(... flap=false ...)` twice
+   — once for the front (top) letter at `flap_index` and once for the
+   back (bottom) letter at `flap_index - 1`, translated and rotated 180°
+   to sit below the top.  `flap=false` suppresses the flap outline, so
+   only the letter geometry is exported.  The wrapper also `echo()`s
+   `flap_width`, `flap_height`, `flap_gap`, `flap_pin_width`; the driver
+   captures these via `openscad.extract_values`.
+4. Post-processes the SVG (`_postprocess_svg`):
+   - Overrides `viewBox` / `width` / `height` so the SVG covers exactly
+     `flap_width x (2*flap_height + flap_gap)` mm — the canonical display
+     face the flap_printer expects.
+   - Applies `apply_laser_etch_style()` (`fill=#000000`, `stroke=none`)
+     so the letters render as solid ink rather than thin cut outlines.
+   - Calls `remove_redundant_lines()` to collapse duplicate coincident
+     edges left over from the cut-style export.
+5. Special-cases the space character (index 0): OpenSCAD produces no
+   geometry, so the driver emits an empty SVG with the correct viewBox
+   via `_write_empty_svg`.
+6. Also writes `index.json` recording the font, character list, and
+   `index_to_char` mapping for downstream tooling.
+
+#### svg.path version pinning
+
+Scott's `svg_processor.py` asserts `int(version('svg.path').split('.')[0]) == 6`.
+Newer versions (7.x) break this assertion at import time, so the project
+pins `svg.path==6.*` in `pvv_tools/requirements.txt`.
+
+### Adding a new flap type
+
+The minimal contract for a custom flap type is: at the end of
+`config.load_config`, `flap.source_path` must point to a loadable raster
+or SVG (or `flap.type == 'blank'` for transparency).  Anything more
+elaborate — a generator that runs at config-load time, a procedural source,
+etc. — should be added in `config.load_config` and lower itself to
+`single` / `multi-module` semantics before validation continues.  This
+keeps `renderer.py` unaware of higher-level flap types.
