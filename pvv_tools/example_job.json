@@ -1,0 +1,119 @@
+{
+    "display": {
+        "num_modules": 48,
+        "module_pitch_mm": 64,
+        "inter_module_gap_mm": 10
+    },
+    "jig": {
+        "type": "minibed",
+        "flip_mode": "left-right",
+        "output_orientation": "landscape"
+    },
+    "output": {
+        "dpi": 360,
+        "format": "png",
+        "bleed_mm": 1.0,
+        "ink_save_mask": true,
+        "labels": true,
+        "label_font_size_pt": 6,
+        "output_dir": "output"
+    },
+    "global_transforms": {
+        "scale": [1.0, 1.0],
+        "crop_percent": null,
+        "fit_mode": "fit"
+    },
+    "dimensions": {
+    },
+    "custom_flaps": [
+        {
+            "slot": 0,
+            "label": "EP42",
+            "type": "blank"
+        },
+        {
+            "slot": 1,
+            "label": "EP43",
+            "source": "images/sample_01.png",
+            "type": "single"
+        },
+        {
+            "slot": 2,
+            "label": "EP44",
+            "source": "images/sample_02.png",
+            "type": "single"
+        },
+        {
+            "slot": 3,
+            "label": "EP45",
+            "source": "images/sample_03.png",
+            "type": "single"
+        },
+        {
+            "slot": 4,
+            "label": "EP46",
+            "source": "images/sample_04.png",
+            "type": "single"
+        },
+        {
+            "slot": 5,
+            "label": "EP47",
+            "source": "images/sample_05.png",
+            "type": "single"
+        },
+        {
+            "slot": 6,
+            "label": "EP48",
+            "source": "images/sample_06.png",
+            "type": "single"
+        },
+        {
+            "slot": 7,
+            "label": "EP49",
+            "source": "images/sample_07.png",
+            "type": "single"
+        },
+        {
+            "slot": 8,
+            "label": "EP50",
+            "source": "images/sample_08.png",
+            "type": "single"
+        },
+        {
+            "slot": 9,
+            "label": "EP51",
+            "source": "images/sample_09.png",
+            "type": "single"
+        },
+        {
+            "slot": 10,
+            "label": "EP52",
+            "source": "images/sample_10.png",
+            "type": "single"
+        },
+        {
+            "slot": 11,
+            "label": "EP53",
+            "source": "images/sample_11.png",
+            "type": "single"
+        },
+        {
+            "slot": 12,
+            "label": "EP54",
+            "source": "images/sample_12.png",
+            "type": "single"
+        },
+        {
+            "slot": 13,
+            "label": "EP55",
+            "source": "images/sample_13.png",
+            "type": "single"
+        },
+        {
+            "slot": 14,
+            "label": "EP56",
+            "source": "images/sample_14.png",
+            "type": "single"
+        }
+    ]
+}
