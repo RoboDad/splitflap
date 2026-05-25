@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Generate per-character Epilogue flap SVGs for use with flap_printer.
+
+For each character in Scott Bezek's standard 52-character flap list, this
+script invokes OpenSCAD on pvv_tools/scad/epilogue_flap_single.scad via
+Scott's projection_renderer pipeline (3d/scripts/) to produce a single
+SVG that depicts that character's full display face (top half + bottom
+half, no flap outline).
+
+Outputs are written to pvv_tools/assets/epilogue_flaps/ as flap_NN.svg
+(0-padded indices) along with index.json mapping indices to characters.
+
+Run once per font change; the resulting SVGs are committed and used by
+the ``"epilogue"`` flap type in job configs.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+# Add Scott's 3d/scripts to sys.path so we can import his renderer.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / '3d' / 'scripts'))
+sys.path.insert(0, str(_REPO_ROOT))
+
+from projection_renderer import Renderer  # noqa: E402
+from svg_processor import SvgProcessor  # noqa: E402
+
+# Must stay in sync with 3d/flap_characters.scad.  We re-state it here so
+# we can build the index.json without parsing SCAD.
+CHARACTER_LIST = " ABCDEFGHIJKLMNOPQRSTUVWXYZg0123456789r.?-$'#yp,!@&w"
+
+# Friendly names for non-alphanumeric characters, used in optional debug
+# logging only (filenames stay numeric for unambiguity).
+_CHAR_NAMES = {
+    ' ': 'space', '.': 'dot', '?': 'qmark', '-': 'dash',
+    '$': 'dollar', "'": 'apos', '#': 'hash', ',': 'comma',
+    '!': 'bang', '@': 'at', '&': 'amp',
+}
+
+logger = logging.getLogger(__name__)
+
+
+def _postprocess_svg(svg_path: Path, outputs: dict) -> None:
+    """Rewrite the SVG so it matches the flap display face exactly.
+
+    OpenSCAD's projection export sets the viewBox to the bounding box of
+    the rendered geometry (i.e. the letter outlines), which is too small
+    and offset wrong for use as a "display face" SVG.  We post-process to:
+
+      1. Override viewBox + width/height so the SVG's coordinate system
+         exactly covers (flap_width) x (2*flap_height + flap_gap) mm,
+         with (0, 0) at the top-left of the top flap face.
+      2. Apply etch styling (black fill, no stroke) — the letters need to
+         render as solid ink, not as thin cut outlines.
+      3. Remove redundant duplicate line segments before fill conversion.
+    """
+    flap_w = float(outputs['epilogue_flap_width'])
+    flap_h = float(outputs['epilogue_flap_height'])
+    flap_gap = float(outputs['epilogue_flap_gap'])
+    flap_pin = float(outputs['epilogue_flap_pin_width'])
+
+    # SCAD origin: top-flap content occupies SCAD-y in [-pin/2, h - pin/2].
+    # SVG y is inverted in OpenSCAD's projection export, so SCAD y=h-pin/2
+    # becomes SVG y = -(h - pin/2).  ViewBox starts there and spans the
+    # full display face height (2h + gap).
+    vb_x = 0.0
+    vb_y = -(flap_h - flap_pin / 2)
+    vb_w = flap_w
+    vb_h = 2 * flap_h + flap_gap
+
+    processor = SvgProcessor(str(svg_path))
+    processor.remove_redundant_lines()
+    processor.apply_laser_etch_style()
+    # Override SVG root attributes directly.
+    svg_node = processor.svg_node
+    svg_node.setAttribute('width', f'{vb_w}mm')
+    svg_node.setAttribute('height', f'{vb_h}mm')
+    svg_node.setAttribute('viewBox', f'{vb_x} {vb_y} {vb_w} {vb_h}')
+    processor.write(str(svg_path))
+
+
+def render_single(scad_path: Path, flap_index: int, bleed: float, font_preset: str) -> Path:
+    """Render one character's SVG via OpenSCAD; return path to display-face SVG.
+
+    Special-case: the space character (index 0) has no letter geometry, so
+    OpenSCAD's projection produces nothing.  We emit an empty SVG with the
+    correct viewBox in that case.
+    """
+    with tempfile.TemporaryDirectory(prefix='epilogue_flap_') as tmp:
+        renderer = Renderer(
+            input_file=str(scad_path),
+            output_folder=tmp,
+            extra_variables={
+                'flap_index': flap_index,
+                'bleed': bleed,
+                'font_preset': font_preset,
+            },
+        )
+        renderer.clean()
+        try:
+            svg_path, outputs = renderer.render_svgs(panelize_quantity=1)
+            _postprocess_svg(Path(svg_path), outputs)
+        except AttributeError:
+            # No geometry produced (e.g. the space character).  Build an
+            # empty SVG using the SCAD-echoed dims from a dry-run extract.
+            outputs = renderer._get_extracted_outputs()
+            svg_path = str(Path(tmp) / 'combined.svg')
+            _write_empty_svg(Path(svg_path), outputs)
+
+        out_tmp = Path(tmp).parent / f'_epilogue_{flap_index:02d}.svg'
+        shutil.copy(svg_path, out_tmp)
+        return out_tmp
+
+
+def _write_empty_svg(svg_path: Path, outputs: dict) -> None:
+    flap_w = float(outputs['epilogue_flap_width'])
+    flap_h = float(outputs['epilogue_flap_height'])
+    flap_gap = float(outputs['epilogue_flap_gap'])
+    flap_pin = float(outputs['epilogue_flap_pin_width'])
+    vb_y = -(flap_h - flap_pin / 2)
+    vb_h = 2 * flap_h + flap_gap
+    svg_path.write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{flap_w}mm" '
+        f'height="{vb_h}mm" viewBox="0 {vb_y} {flap_w} {vb_h}" version="1.1"/>\n',
+        encoding='utf-8',
+    )
+
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output-dir', type=Path,
+                        default=_REPO_ROOT / 'pvv_tools' / 'assets' / 'epilogue_flaps',
+                        help='Where to write flap_NN.svg files')
+    parser.add_argument('--font', default='Epilogue',
+                        help='Font preset name (see 3d/flap_fonts.scad)')
+    parser.add_argument('--bleed', type=float, default=0.0,
+                        help='Letter bleed (mm); usually 0 here, since the '
+                             'flap_printer applies its own bleed at raster time')
+    parser.add_argument('--only', type=int, default=None,
+                        help='Render only this index (for debugging)')
+    args = parser.parse_args()
+
+    scad_path = _REPO_ROOT / 'pvv_tools' / 'scad' / 'epilogue_flap_single.scad'
+    if not scad_path.exists():
+        logger.error("SCAD wrapper not found: %s", scad_path)
+        return 1
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    indices = [args.only] if args.only is not None else range(len(CHARACTER_LIST))
+    index_map: dict[int, str] = {}
+
+    for i in indices:
+        char = CHARACTER_LIST[i]
+        friendly = _CHAR_NAMES.get(char, char)
+        logger.info("Rendering flap %02d  (char %r / %s)", i, char, friendly)
+
+        produced = render_single(scad_path, flap_index=i, bleed=args.bleed,
+                                 font_preset=args.font)
+        dest = args.output_dir / f'flap_{i:02d}.svg'
+        shutil.move(str(produced), str(dest))
+        index_map[i] = char
+        logger.info("  -> %s", dest)
+
+    # Always include the full mapping in index.json (even on --only runs)
+    full_map = {i: c for i, c in enumerate(CHARACTER_LIST)}
+    index_path = args.output_dir / 'index.json'
+    with open(index_path, 'w', encoding='utf-8') as f:
+        json.dump({
+            'font': args.font,
+            'character_list': CHARACTER_LIST,
+            'index_to_char': full_map,
+        }, f, indent=2)
+    logger.info("Wrote %s", index_path)
+
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
