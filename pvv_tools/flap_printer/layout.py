@@ -144,9 +144,11 @@ def draw_registration_marks(
     Each mark is two perpendicular line segments (horizontal + vertical arm)
     hugging the corner.  Lines have thickness `line_width_mm` and are
     positioned flush with the image edges so they sit fully inside the image
-    bounds.  The top-left ("origin") corner uses `origin_color` (green by
-    default); the other three corners use `other_color` (white by default).
-    Useful for visually verifying jig alignment after printing.
+    bounds.  The bottom-right ("origin") corner uses `origin_color` (green by
+    default) — this matches the eufyMake Studio mat origin, which sits at
+    the lower-right of the imported canvas.  The other three corners use
+    `other_color` (white by default).  Useful for visually verifying jig
+    alignment after printing.
 
     Operates on the post-rotation final image.  Returns a new image; does not
     mutate the input.
@@ -161,10 +163,10 @@ def draw_registration_marks(
     # corner: (color, anchor_x, anchor_y, dx_sign, dy_sign)
     # anchor is the outer corner pixel; dx/dy point toward the image interior.
     corners = [
-        (origin_color, 0,     0,     +1, +1),  # top-left = origin
+        (other_color,  0,     0,     +1, +1),  # top-left
         (other_color,  w - 1, 0,     -1, +1),  # top-right
         (other_color,  0,     h - 1, +1, -1),  # bottom-left
-        (other_color,  w - 1, h - 1, -1, -1),  # bottom-right
+        (origin_color, w - 1, h - 1, -1, -1),  # bottom-right = eufyMake origin
     ]
 
     for color, ax, ay, dx, dy in corners:
