@@ -92,7 +92,7 @@ See `example_job.json` for a complete example. The config has five sections:
 | `ink_save_mask` | bool | `true` | Zero alpha outside flap pockets to save ink |
 | `labels` | bool | `true` | Render EP slot labels in the gap areas |
 | `label_font_size_pt` | int | `6` | Label font size in points |
-| `output_dir` | string | `"output"` | Output directory (relative to CWD) |
+| `output_dir` | string | `"output"` | Output directory (relative paths are resolved against the job file's directory, not CWD) |
 
 ### `global_transforms` — Default image transforms
 

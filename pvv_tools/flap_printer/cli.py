@@ -109,13 +109,22 @@ def main(argv: list[str] | None = None) -> int:
         print("Validation: OK")
         return 0
 
+    # Resolve output_dir relative to the job file's directory (not CWD)
+    # so output always lands in a predictable place regardless of where
+    # the command is invoked from.
+    job_dir = Path(args.job_file).resolve().parent
+    raw_out = args.output_dir or config.output.output_dir
+    out_path = Path(raw_out)
+    if not out_path.is_absolute():
+        out_path = (job_dir / out_path).resolve()
+
     # Render
     try:
         generated = render_job(
             config=config,
             dims=dims,
             dpi=args.dpi,
-            output_dir=args.output_dir,
+            output_dir=str(out_path),
             module_filter=args.modules,
             enable_labels=False if args.no_labels else None,
             enable_mask=False if args.no_mask else None,
