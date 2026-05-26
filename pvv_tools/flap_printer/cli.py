@@ -73,6 +73,26 @@ def main(argv: list[str] | None = None) -> int:
             module_width=dims.flap.width,
         )
 
+    # Apply output.canvas_size_mm override (e.g. match eufyMake Studio's
+    # mat canvas: [90, 335]).  The canvas top-left sits at the same mat
+    # zero-point origin as the physical printable area, so the insert's
+    # offset within the canvas is identical to its offset within the
+    # printable area — only the canvas dimensions change.  This grows the
+    # output image to match the eufyMake working canvas without shifting
+    # any flap content.
+    if config.output.canvas_size_mm is not None:
+        cw, ch = config.output.canvas_size_mm
+        dims.printable = dims.printable.__class__(
+            width=cw,
+            height=ch,
+            insert_offset_x=dims.printable.insert_offset_x,
+            insert_offset_y=dims.printable.insert_offset_y,
+            printable_origin_x=dims.printable.printable_origin_x,
+            printable_origin_y=dims.printable.printable_origin_y,
+            insert_origin_x=dims.printable.insert_origin_x,
+            insert_origin_y=dims.printable.insert_origin_y,
+        )
+
     # Dry run: just print summary
     if args.dry_run:
         print("=== Flap Printer — Dry Run ===")
@@ -86,7 +106,9 @@ def main(argv: list[str] | None = None) -> int:
         insert = dims.jig.insert_size(dims.flap)
         print(f"  Jig insert: {insert[0]:.1f}×{insert[1]:.1f}mm ({dims.jig.flaps_per_batch} flaps/batch)")
         pa = dims.printable
-        print(f"  Printable area: {pa.width}×{pa.height}mm")
+        canvas_overridden = config.output.canvas_size_mm is not None
+        label = "Output canvas" if canvas_overridden else "Printable area"
+        print(f"  {label}: {pa.width}×{pa.height}mm")
         print(f"  Insert offset: ({pa.insert_offset_x:.1f}, {pa.insert_offset_y:.1f})mm")
         print(f"  Module pitch: {dims.display.module_pitch}mm, gap: {dims.display.inter_module_gap}mm")
         print()

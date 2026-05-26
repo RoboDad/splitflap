@@ -14,9 +14,10 @@
     "format": "png",
     "bleed_mm": 1.0,
     "ink_save_mask": true,
-    "labels": true,
+    "labels": false,
     "label_font_size_pt": 6,
-    "output_dir": "prototype_output"
+    "output_dir": "prototype_output",
+    "canvas_size_mm": [90, 335]
   },
   "custom_flaps": [
     {"slot":  0, "label": "EP42", "type": "epilogue", "char": "-"},

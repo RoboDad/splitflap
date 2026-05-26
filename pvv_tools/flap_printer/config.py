@@ -47,6 +47,14 @@ class OutputConfig:
     labels: bool = True
     label_font_size_pt: int = 6
     output_dir: str = "output"
+    # Optional (width_mm, height_mm) override for the output image canvas.
+    # When set, the canvas is treated as the eufyMake Studio mat working canvas
+    # (origin = mat zero-point), and the jig insert is placed at absolute mat
+    # coordinates from SCAD (minibed_insert_origin_x/y).  Use this to match
+    # eufyMake Studio's reported canvas size (e.g. [90, 335]) without
+    # touching the physical jig dimensions.  Leave unset to use the SCAD
+    # printable-area size.
+    canvas_size_mm: Optional[tuple[float, float]] = None
 
 
 VALID_FIT_MODES = ('fit', 'fill', 'stretch', 'contain')
@@ -180,6 +188,13 @@ def load_config(path: str | Path) -> JobConfig:
 
     # Output section
     o = raw.get('output', {})
+    canvas_raw = _get(o, 'canvas_size_mm', None)
+    if canvas_raw is not None:
+        if len(canvas_raw) != 2:
+            raise ValueError("output.canvas_size_mm must be [width_mm, height_mm]")
+        canvas_size = (float(canvas_raw[0]), float(canvas_raw[1]))
+    else:
+        canvas_size = None
     output = OutputConfig(
         dpi=_get(o, 'dpi', 360),
         format=_get(o, 'format', 'png'),
@@ -188,6 +203,7 @@ def load_config(path: str | Path) -> JobConfig:
         labels=_get(o, 'labels', True),
         label_font_size_pt=_get(o, 'label_font_size_pt', 6),
         output_dir=_get(o, 'output_dir', 'output'),
+        canvas_size_mm=canvas_size,
     )
 
     # Global transforms

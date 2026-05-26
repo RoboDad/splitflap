@@ -68,11 +68,25 @@ class JigDimensions:
 
 @dataclass(frozen=True)
 class PrintableAreaDimensions:
-    """Printable area of the printer bed, and the insert's position within it."""
-    width: float = 88.0           # mm — minibed_printable_size_x
-    height: float = 330.0         # mm — minibed_printable_size_y
-    insert_offset_x: float = 11.0 # mm — offset from printable left edge to insert left edge
-    insert_offset_y: float = 15.0 # mm — offset from printable bottom edge to insert bottom edge
+    """Printable area of the printer bed, and the insert's position within it.
+
+    The four fields below (width/height/insert_offset_x/insert_offset_y) define
+    the canvas the renderer draws onto and where the jig insert sits on it.
+    By default these come from the SCAD printable-area + insert geometry, but
+    `output.canvas_size_mm` in the job config can replace them with the
+    eufyMake Studio mat-canvas dimensions (using absolute mat coordinates for
+    the insert).  The `*_origin_*` fields below are the raw absolute mat
+    coordinates exported from SCAD; they enable that override in cli.py.
+    """
+    width: float = 88.0           # mm — canvas width  (defaults to minibed_printable_size_x)
+    height: float = 330.0         # mm — canvas height (defaults to minibed_printable_size_y)
+    insert_offset_x: float = 11.0 # mm — insert X within canvas
+    insert_offset_y: float = 15.0 # mm — insert Y within canvas
+    # Raw absolute mat coordinates (from SCAD); used when canvas is overridden
+    printable_origin_x: float = 5.0
+    printable_origin_y: float = 33.0
+    insert_origin_x: float = 16.0
+    insert_origin_y: float = 49.5
 
 
 @dataclass(frozen=True)
@@ -156,21 +170,29 @@ class AllDimensions:
         insert_w, insert_h = jig.insert_size(flap)
         printable_w = _get('minibed_printable_size_x', 88.0)
         printable_h = _get('minibed_printable_size_y', 330.0)
+        printable_origin_x = _get('minibed_printable_origin_x', 5.0)
+        printable_origin_y = _get('minibed_printable_origin_y', 33.0)
         if ('minibed_insert_origin_x' in scad_vals
                 and 'minibed_printable_origin_x' in scad_vals):
-            insert_offset_x = (scad_vals['minibed_insert_origin_x']
-                               - scad_vals['minibed_printable_origin_x'])
-            insert_offset_y = (scad_vals['minibed_insert_origin_y']
-                               - scad_vals['minibed_printable_origin_y'])
+            insert_origin_x = scad_vals['minibed_insert_origin_x']
+            insert_origin_y = scad_vals['minibed_insert_origin_y']
+            insert_offset_x = insert_origin_x - printable_origin_x
+            insert_offset_y = insert_origin_y - printable_origin_y
         else:
             insert_offset_x = (printable_w - insert_w) / 2.0
             insert_offset_y = (printable_h - insert_h) / 2.0
+            insert_origin_x = insert_offset_x + printable_origin_x
+            insert_origin_y = insert_offset_y + printable_origin_y
 
         printable = PrintableAreaDimensions(
             width=printable_w,
             height=printable_h,
             insert_offset_x=insert_offset_x,
             insert_offset_y=insert_offset_y,
+            printable_origin_x=printable_origin_x,
+            printable_origin_y=printable_origin_y,
+            insert_origin_x=insert_origin_x,
+            insert_origin_y=insert_origin_y,
         )
 
         display = DisplayDimensions(

@@ -93,6 +93,7 @@ See `example_job.json` for a complete example. The config has five sections:
 | `labels` | bool | `true` | Render EP slot labels in the gap areas |
 | `label_font_size_pt` | int | `6` | Label font size in points |
 | `output_dir` | string | `"output"` | Output directory (relative paths are resolved against the job file's directory, not CWD) |
+| `canvas_size_mm` | `[w, h]` | _unset_ | Optional output image canvas size in mm. When set, the rendered image is sized to these dimensions (e.g. `[90, 335]` to match eufyMake Studio's mat working canvas) without changing physical jig geometry. The canvas top-left aligns with the printable-area origin, so the insert and all flap positions stay fixed; only the surrounding image area grows or shrinks. Omit to use the SCAD printable-area size. |
 
 ### `global_transforms` — Default image transforms
 

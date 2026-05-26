@@ -77,7 +77,7 @@ const uint8_t flaps[NUM_FLAPS] = {
 // const uint8_t flaps[NUM_FLAPS] = {
 //   <FILL THIS IN!>
 // };
-
+ 
 
 // 4) Hardware configuration and features
 #ifndef SPLITFLAP_PIO_HARDWARE_CONFIG
