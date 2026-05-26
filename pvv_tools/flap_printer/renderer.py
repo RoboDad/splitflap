@@ -214,8 +214,22 @@ def render_job(
                 back_img = render_labels(back_img, reordered_back, dims.flap, dims.jig, dims.printable, dpi,
                                          config.output.label_font_size_pt, orient)
 
-            # Set DPI metadata
-            dpi_info = (dpi, dpi)
+            # Set DPI metadata.
+            # Compute the *effective* DPI from the actual saved pixel count
+            # and the intended physical size in mm, so that downstream tools
+            # (eufyMake Studio, etc.) read the image back at exactly the
+            # target mm dimensions instead of off-by-pixel-rounding values
+            # (e.g. 90 mm @ 360 DPI → 1276 px, which naively reads back as
+            # 90.022 mm).  Per-axis because the actual pixel rounding can
+            # differ on each axis.  Orientation may swap width/height.
+            img_w_px, img_h_px = front_img.size
+            if orient == "landscape":
+                target_mm_w, target_mm_h = dims.printable.height, dims.printable.width
+            else:
+                target_mm_w, target_mm_h = dims.printable.width, dims.printable.height
+            eff_dpi_x = img_w_px * 25.4 / target_mm_w
+            eff_dpi_y = img_h_px * 25.4 / target_mm_h
+            dpi_info = (eff_dpi_x, eff_dpi_y)
 
             # Save
             fmt = config.output.format.lower()
