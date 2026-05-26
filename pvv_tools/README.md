@@ -93,7 +93,24 @@ See `example_job.json` for a complete example. The config has five sections:
 | `labels` | bool | `true` | Render EP slot labels in the gap areas |
 | `label_font_size_pt` | int | `6` | Label font size in points |
 | `output_dir` | string | `"output"` | Output directory (relative paths are resolved against the job file's directory, not CWD) |
-| `canvas_size_mm` | `[w, h]` | _unset_ | Optional output image canvas size in mm. When set, the rendered image is sized to these dimensions (e.g. `[90, 335]` to match eufyMake Studio's mat working canvas) without changing physical jig geometry. The canvas top-left aligns with the printable-area origin, so the insert and all flap positions stay fixed; only the surrounding image area grows or shrinks. Omit to use the SCAD printable-area size. |
+| `canvas_size_mm` | `[w, h]` | _unset_ | Optional output image canvas size in mm. When set, the rendered image is sized to these dimensions without changing physical jig geometry. The canvas top-left aligns with the printable-area origin, so the insert and all flap positions stay fixed; only the surrounding image area grows or shrinks. Omit to use the SCAD printable-area size (88 × 333 mm, matches eufyMake **Zero Point** alignment mode). See note below on eufyMake alignment modes. |
+| `registration_marks` | bool | `false` | Draw 5 mm L-shaped registration marks in the 4 corners of the output image to aid alignment debugging. The bottom-right mark is rendered green to indicate the eufyMake Zero-Point origin; the other three are white. |
+| `registration_mark_line_width_mm` | float | `1.0` | Line width (mm) of the registration mark arms. Marks thinner than ~0.5 mm tend not to print reliably on the eufyMake. |
+
+> **eufyMake alignment modes & canvas size.** The eufyMake Studio app has two
+> alignment modes with *different* working canvas sizes:
+>
+> | Mode | Canvas size | Origin reference |
+> |------|-------------|------------------|
+> | **Camera** | 335 × 90 mm | Camera-detected mat position |
+> | **Zero Point** | 333 × 88 mm | Mat zero-point (lower-right corner of imported image) |
+>
+> The SCAD `minibed_printable_size_*` constants (88 × 333) match **Zero Point**
+> mode exactly, so the default (no `canvas_size_mm` override) is correct when
+> using the alignment jig in Zero Point mode. Importing a 335 × 90 image into
+> Zero Point mode will appear ≈2 mm offset because the origin reference doesn't
+> match the image canvas. If you intend to use Camera mode, set
+> `canvas_size_mm: [90, 335]`.
 
 ### `global_transforms` — Default image transforms
 
