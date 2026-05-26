@@ -62,6 +62,15 @@ class OutputConfig:
     # Line width (mm) for registration marks.  Larger values are more visible
     # on the print and more reliable on lower-resolution print heads.
     registration_mark_line_width_mm: float = 1.0
+    # Global (dx_mm, dy_mm) shift applied to every drawn element in the
+    # final output image (flap art, ink-save mask, labels, and registration
+    # marks all shift together).  Use this to compensate for a systematic
+    # offset between the printer's zero-point and the physical jig (e.g.
+    # the eufyMake Zero-Point calibration being off by a couple of mm).
+    # Positive dx moves content toward +X in the output image (in landscape
+    # orientation this is the long axis); positive dy moves content toward +Y.
+    # Content shifted past the image edge is clipped.
+    calibration_offset_mm: tuple[float, float] = (0.0, 0.0)
 
 
 VALID_FIT_MODES = ('fit', 'fill', 'stretch', 'contain')
@@ -164,6 +173,15 @@ def _get(d: dict, key: str, default=None):
     return val if val is not None else default
 
 
+def _parse_offset(raw) -> tuple[float, float]:
+    """Parse a [dx, dy] offset list/tuple into a (float, float) tuple."""
+    if raw is None:
+        return (0.0, 0.0)
+    if len(raw) != 2:
+        raise ValueError("output.calibration_offset_mm must be [dx_mm, dy_mm]")
+    return (float(raw[0]), float(raw[1]))
+
+
 def load_config(path: str | Path) -> JobConfig:
     """Load and validate a JSON job config file."""
     path = Path(path)
@@ -213,6 +231,7 @@ def load_config(path: str | Path) -> JobConfig:
         canvas_size_mm=canvas_size,
         registration_marks=_get(o, 'registration_marks', False),
         registration_mark_line_width_mm=_get(o, 'registration_mark_line_width_mm', 1.0),
+        calibration_offset_mm=_parse_offset(_get(o, 'calibration_offset_mm', [0.0, 0.0])),
     )
 
     # Global transforms

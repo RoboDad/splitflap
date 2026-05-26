@@ -19,6 +19,18 @@ from . import svg_loader
 logger = logging.getLogger(__name__)
 
 
+def _apply_calibration_offset(img: Image.Image, dx_px: int, dy_px: int) -> Image.Image:
+    """Translate ``img`` by (dx_px, dy_px) on a fresh transparent canvas of
+    the same size.  Content shifted past the image edge is clipped.  Used
+    to apply a global mat-calibration offset to the final composited image.
+    """
+    if dx_px == 0 and dy_px == 0:
+        return img
+    shifted = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    shifted.paste(img, (dx_px, dy_px), img)
+    return shifted
+
+
 def _load_source_image(flap_cfg: CustomFlap, target_height_px: int) -> Image.Image:
     """Load and validate a source image (raster or SVG).
 
@@ -222,6 +234,17 @@ def render_job(
                 lw = config.output.registration_mark_line_width_mm
                 front_img = draw_registration_marks(front_img, dpi, line_width_mm=lw)
                 back_img = draw_registration_marks(back_img, dpi, line_width_mm=lw)
+
+            # Global calibration offset (applied last so it moves *everything*
+            # — flap art, ink-save mask, labels, and registration marks —
+            # together).  Compensates for systematic printer-vs-jig offsets
+            # such as eufyMake Zero-Point calibration error.
+            cal_dx_mm, cal_dy_mm = config.output.calibration_offset_mm
+            if cal_dx_mm != 0.0 or cal_dy_mm != 0.0:
+                cal_dx_px = round(cal_dx_mm * dpi / 25.4)
+                cal_dy_px = round(cal_dy_mm * dpi / 25.4)
+                front_img = _apply_calibration_offset(front_img, cal_dx_px, cal_dy_px)
+                back_img = _apply_calibration_offset(back_img, cal_dx_px, cal_dy_px)
 
             # Set DPI metadata.
             # Compute the *effective* DPI from the actual saved pixel count
