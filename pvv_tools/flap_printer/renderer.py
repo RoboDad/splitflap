@@ -139,6 +139,7 @@ def render_job(
     module_filter: Optional[list[int]] = None,
     enable_labels: Optional[bool] = None,
     enable_mask: Optional[bool] = None,
+    enable_registration_marks: Optional[bool] = None,
     flip_mode: Optional[str] = None,
     orientation: Optional[str] = None,
 ) -> list[Path]:
@@ -150,6 +151,7 @@ def render_job(
     out_dir = Path(output_dir or config.output.output_dir)
     labels_on = enable_labels if enable_labels is not None else config.output.labels
     mask_on = enable_mask if enable_mask is not None else config.output.ink_save_mask
+    reg_on = enable_registration_marks if enable_registration_marks is not None else config.output.registration_marks
     flip = flip_mode or config.jig.flip_mode
     orient = orientation or config.jig.output_orientation
 
@@ -213,6 +215,12 @@ def render_job(
                                           config.output.label_font_size_pt, orient)
                 back_img = render_labels(back_img, reordered_back, dims.flap, dims.jig, dims.printable, dpi,
                                          config.output.label_font_size_pt, orient)
+
+            # Corner registration marks (after mask + labels so they aren't clipped)
+            if reg_on:
+                from .layout import draw_registration_marks
+                front_img = draw_registration_marks(front_img, dpi)
+                back_img = draw_registration_marks(back_img, dpi)
 
             # Set DPI metadata.
             # Compute the *effective* DPI from the actual saved pixel count

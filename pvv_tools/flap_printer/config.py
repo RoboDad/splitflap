@@ -55,6 +55,10 @@ class OutputConfig:
     # touching the physical jig dimensions.  Leave unset to use the SCAD
     # printable-area size.
     canvas_size_mm: Optional[tuple[float, float]] = None
+    # If true, draw thin L-shaped registration marks at the four corners of
+    # the output image (top-left is green = origin, others white).  Useful
+    # for visually verifying jig-vs-print alignment.
+    registration_marks: bool = False
 
 
 VALID_FIT_MODES = ('fit', 'fill', 'stretch', 'contain')
@@ -204,6 +208,7 @@ def load_config(path: str | Path) -> JobConfig:
         label_font_size_pt=_get(o, 'label_font_size_pt', 6),
         output_dir=_get(o, 'output_dir', 'output'),
         canvas_size_mm=canvas_size,
+        registration_marks=_get(o, 'registration_marks', False),
     )
 
     # Global transforms

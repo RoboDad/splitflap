@@ -131,6 +131,55 @@ def generate_batch_image(
     return canvas
 
 
+def draw_registration_marks(
+    image: Image.Image,
+    dpi: float,
+    line_width_mm: float = 0.2,
+    arm_length_mm: float = 5.0,
+    origin_color: tuple = (0, 255, 0, 255),
+    other_color: tuple = (255, 255, 255, 255),
+) -> Image.Image:
+    """Draw L-shaped corner registration marks at the four image corners.
+
+    Each mark is two perpendicular line segments (horizontal + vertical arm)
+    hugging the corner.  Lines have thickness `line_width_mm` and are
+    positioned flush with the image edges so they sit fully inside the image
+    bounds.  The top-left ("origin") corner uses `origin_color` (green by
+    default); the other three corners use `other_color` (white by default).
+    Useful for visually verifying jig alignment after printing.
+
+    Operates on the post-rotation final image.  Returns a new image; does not
+    mutate the input.
+    """
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+
+    lw_px = max(1, int(round(line_width_mm * dpi / 25.4)))
+    arm_px = max(lw_px * 2, int(round(arm_length_mm * dpi / 25.4)))
+    w, h = img.size
+
+    # corner: (color, anchor_x, anchor_y, dx_sign, dy_sign)
+    # anchor is the outer corner pixel; dx/dy point toward the image interior.
+    corners = [
+        (origin_color, 0,     0,     +1, +1),  # top-left = origin
+        (other_color,  w - 1, 0,     -1, +1),  # top-right
+        (other_color,  0,     h - 1, +1, -1),  # bottom-left
+        (other_color,  w - 1, h - 1, -1, -1),  # bottom-right
+    ]
+
+    for color, ax, ay, dx, dy in corners:
+        # Horizontal arm: arm_px long along x, lw_px tall along y
+        hx0, hx1 = (ax, ax + dx * arm_px) if dx > 0 else (ax + dx * arm_px, ax)
+        hy0, hy1 = (ay, ay + dy * lw_px) if dy > 0 else (ay + dy * lw_px, ay)
+        draw.rectangle([hx0, hy0, hx1, hy1], fill=color)
+        # Vertical arm: lw_px wide along x, arm_px tall along y
+        vx0, vx1 = (ax, ax + dx * lw_px) if dx > 0 else (ax + dx * lw_px, ax)
+        vy0, vy1 = (ay, ay + dy * arm_px) if dy > 0 else (ay + dy * arm_px, ay)
+        draw.rectangle([vx0, vy0, vx1, vy1], fill=color)
+
+    return img
+
+
 def apply_flip_transform(image: Image.Image, flip_mode: str) -> Image.Image:
     """Flip an image to produce the back-side print layout.
 

@@ -32,6 +32,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--modules', type=int, nargs='+', default=None, help='Process specific modules only')
     parser.add_argument('--no-labels', action='store_true', help='Disable EP labels')
     parser.add_argument('--no-mask', action='store_true', help='Disable ink-saving mask')
+    parser.add_argument('--registration-marks', dest='registration_marks', action='store_true', default=None,
+                        help='Draw corner registration marks on output images (overrides config)')
+    parser.add_argument('--no-registration-marks', dest='registration_marks', action='store_false',
+                        help='Disable corner registration marks (overrides config)')
     parser.add_argument('--flip-mode', choices=['left-right', 'front-back'], default=None, help='Override flip mode')
     parser.add_argument('--print-size', type=float, nargs=2, metavar=('W', 'H'), default=None,
                         help='Override output size in mm (width height)')
@@ -150,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
             module_filter=args.modules,
             enable_labels=False if args.no_labels else None,
             enable_mask=False if args.no_mask else None,
+            enable_registration_marks=args.registration_marks,
             flip_mode=args.flip_mode,
         )
     except Exception as e:
