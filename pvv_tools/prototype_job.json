@@ -10,7 +10,7 @@
     "output_orientation": "landscape"
   },
   "output": {
-    "dpi": 360,
+    "dpi": 508,
     "format": "png",
     "bleed_mm": 1.0,
     "ink_save_mask": true,
