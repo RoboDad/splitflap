@@ -212,6 +212,12 @@ image is fit to the physical target size using the active `fit_mode`.
   {"slot": 1, "type": "epilogue", "index": 5}
   ```
 
+  The bundled assets are pre-rendered with a **white** (`#ffffff`) fill,
+  intended for printing on dark flap stock. To regenerate them in a
+  different color (e.g. black for white stock), re-run the Epilogue
+  generator with `--fill-color` — see
+  [Epilogue generator](#epilogue-generator-generate_epilogue_flap_svgspy).
+
 ### SVG Inputs
 
 Any `single` or `multi-module` source whose path ends in `.svg` is
@@ -449,6 +455,12 @@ For each of the 52 characters it:
      face the flap_printer expects.
    - Applies `apply_laser_etch_style()` (`fill=#000000`, `stroke=none`)
      so the letters render as solid ink rather than thin cut outlines.
+   - Overrides the `fill` attribute on every `<path>` with the value of
+     `--fill-color` (default `#ffffff`).  This runs after
+     `apply_laser_etch_style()` so the shared utility in
+     `3d/scripts/svg_processor.py` is left untouched.  Pass
+     `--fill-color "#000000"` to regenerate black-on-transparent assets
+     for printing on light flap stock.
    - Calls `remove_redundant_lines()` to collapse duplicate coincident
      edges left over from the cut-style export.
 5. Special-cases the space character (index 0): OpenSCAD produces no

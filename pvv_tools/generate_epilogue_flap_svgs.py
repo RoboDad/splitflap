@@ -47,7 +47,7 @@ _CHAR_NAMES = {
 logger = logging.getLogger(__name__)
 
 
-def _postprocess_svg(svg_path: Path, outputs: dict) -> None:
+def _postprocess_svg(svg_path: Path, outputs: dict, fill_color: str) -> None:
     """Rewrite the SVG so it matches the flap display face exactly.
 
     OpenSCAD's projection export sets the viewBox to the bounding box of
@@ -57,8 +57,9 @@ def _postprocess_svg(svg_path: Path, outputs: dict) -> None:
       1. Override viewBox + width/height so the SVG's coordinate system
          exactly covers (flap_width) x (2*flap_height + flap_gap) mm,
          with (0, 0) at the top-left of the top flap face.
-      2. Apply etch styling (black fill, no stroke) — the letters need to
-         render as solid ink, not as thin cut outlines.
+      2. Apply etch styling, then override fill to *fill_color* — the
+         letters need to render as solid ink in the colour the printed
+         flap material requires (typically white on dark flap stock).
       3. Remove redundant duplicate line segments before fill conversion.
     """
     flap_w = float(outputs['epilogue_flap_width'])
@@ -78,6 +79,10 @@ def _postprocess_svg(svg_path: Path, outputs: dict) -> None:
     processor = SvgProcessor(str(svg_path))
     processor.remove_redundant_lines()
     processor.apply_laser_etch_style()
+    # Override the fill colour set by apply_laser_etch_style() (which
+    # hard-codes #000000) to whatever the caller asked for.
+    for path in processor.svg_node.getElementsByTagName('path'):
+        path.setAttribute('fill', fill_color)
     # Override SVG root attributes directly.
     svg_node = processor.svg_node
     svg_node.setAttribute('width', f'{vb_w}mm')
@@ -86,7 +91,8 @@ def _postprocess_svg(svg_path: Path, outputs: dict) -> None:
     processor.write(str(svg_path))
 
 
-def render_single(scad_path: Path, flap_index: int, bleed: float, font_preset: str) -> Path:
+def render_single(scad_path: Path, flap_index: int, bleed: float, font_preset: str,
+                  fill_color: str) -> Path:
     """Render one character's SVG via OpenSCAD; return path to display-face SVG.
 
     Special-case: the space character (index 0) has no letter geometry, so
@@ -106,7 +112,7 @@ def render_single(scad_path: Path, flap_index: int, bleed: float, font_preset: s
         renderer.clean()
         try:
             svg_path, outputs = renderer.render_svgs(panelize_quantity=1)
-            _postprocess_svg(Path(svg_path), outputs)
+            _postprocess_svg(Path(svg_path), outputs, fill_color)
         except AttributeError:
             # No geometry produced (e.g. the space character).  Build an
             # empty SVG using the SCAD-echoed dims from a dry-run extract.
@@ -145,6 +151,12 @@ def main() -> int:
     parser.add_argument('--bleed', type=float, default=0.0,
                         help='Letter bleed (mm); usually 0 here, since the '
                              'flap_printer applies its own bleed at raster time')
+    parser.add_argument('--fill-color', default='#ffffff',
+                        help='SVG fill colour for the letter geometry. Defaults '
+                             'to white (#ffffff) since printed flaps are '
+                             'typically dark stock with white ink. Use '
+                             '#000000 for the previous black-on-transparent '
+                             'behaviour.')
     parser.add_argument('--only', type=int, default=None,
                         help='Render only this index (for debugging)')
     args = parser.parse_args()
@@ -165,7 +177,8 @@ def main() -> int:
         logger.info("Rendering flap %02d  (char %r / %s)", i, char, friendly)
 
         produced = render_single(scad_path, flap_index=i, bleed=args.bleed,
-                                 font_preset=args.font)
+                                 font_preset=args.font,
+                                 fill_color=args.fill_color)
         dest = args.output_dir / f'flap_{i:02d}.svg'
         shutil.move(str(produced), str(dest))
         index_map[i] = char
