@@ -148,12 +148,23 @@ class AllDimensions:
             margin_y=_get('minibed_flap_jig_margin_y', 6.0),
         )
 
-        # Compute insert offset within printable area
+        # Insert offset within the printable area.
+        # Preferred: derive from explicit SCAD-exported insert + printable origins
+        # (minibed_insert_origin_x/y and minibed_printable_origin_x/y), so the
+        # insert position is decoupled from changes to printable_size_*.
+        # Fallback: legacy centering computation.
         insert_w, insert_h = jig.insert_size(flap)
         printable_w = _get('minibed_printable_size_x', 88.0)
         printable_h = _get('minibed_printable_size_y', 330.0)
-        insert_offset_x = (printable_w - insert_w) / 2.0
-        insert_offset_y = (printable_h - insert_h) / 2.0
+        if ('minibed_insert_origin_x' in scad_vals
+                and 'minibed_printable_origin_x' in scad_vals):
+            insert_offset_x = (scad_vals['minibed_insert_origin_x']
+                               - scad_vals['minibed_printable_origin_x'])
+            insert_offset_y = (scad_vals['minibed_insert_origin_y']
+                               - scad_vals['minibed_printable_origin_y'])
+        else:
+            insert_offset_x = (printable_w - insert_w) / 2.0
+            insert_offset_y = (printable_h - insert_h) / 2.0
 
         printable = PrintableAreaDimensions(
             width=printable_w,
