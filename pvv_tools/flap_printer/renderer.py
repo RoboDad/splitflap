@@ -219,8 +219,9 @@ def render_job(
             # Corner registration marks (after mask + labels so they aren't clipped)
             if reg_on:
                 from .layout import draw_registration_marks
-                front_img = draw_registration_marks(front_img, dpi)
-                back_img = draw_registration_marks(back_img, dpi)
+                lw = config.output.registration_mark_line_width_mm
+                front_img = draw_registration_marks(front_img, dpi, line_width_mm=lw)
+                back_img = draw_registration_marks(back_img, dpi, line_width_mm=lw)
 
             # Set DPI metadata.
             # Compute the *effective* DPI from the actual saved pixel count

@@ -56,9 +56,12 @@ class OutputConfig:
     # printable-area size.
     canvas_size_mm: Optional[tuple[float, float]] = None
     # If true, draw thin L-shaped registration marks at the four corners of
-    # the output image (top-left is green = origin, others white).  Useful
-    # for visually verifying jig-vs-print alignment.
+    # the output image (bottom-right is green = eufyMake origin, others white).
+    # Useful for visually verifying jig-vs-print alignment.
     registration_marks: bool = False
+    # Line width (mm) for registration marks.  Larger values are more visible
+    # on the print and more reliable on lower-resolution print heads.
+    registration_mark_line_width_mm: float = 1.0
 
 
 VALID_FIT_MODES = ('fit', 'fill', 'stretch', 'contain')
@@ -209,6 +212,7 @@ def load_config(path: str | Path) -> JobConfig:
         output_dir=_get(o, 'output_dir', 'output'),
         canvas_size_mm=canvas_size,
         registration_marks=_get(o, 'registration_marks', False),
+        registration_mark_line_width_mm=_get(o, 'registration_mark_line_width_mm', 1.0),
     )
 
     # Global transforms

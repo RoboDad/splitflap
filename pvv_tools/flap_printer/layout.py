@@ -134,7 +134,7 @@ def generate_batch_image(
 def draw_registration_marks(
     image: Image.Image,
     dpi: float,
-    line_width_mm: float = 0.2,
+    line_width_mm: float = 1.0,
     arm_length_mm: float = 5.0,
     origin_color: tuple = (0, 255, 0, 255),
     other_color: tuple = (255, 255, 255, 255),
