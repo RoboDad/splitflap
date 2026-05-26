@@ -17,7 +17,6 @@
     "labels": false,
     "label_font_size_pt": 6,
     "output_dir": "prototype_output",
-    "canvas_size_mm": [90, 335],
     "registration_marks": true
   },
   "custom_flaps": [
