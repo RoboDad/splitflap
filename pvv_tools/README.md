@@ -81,6 +81,30 @@ See `example_job.json` for a complete example. The config has five sections:
 | `type` | string | `"minibed"` | Jig type (currently only `"minibed"` supported) |
 | `flip_mode` | string | `"left-right"` | How back images are flipped: `"left-right"` (mirror horizontal) or `"front-back"` |
 | `output_orientation` | string | `"landscape"` | Output image orientation: `"landscape"` or `"portrait"` |
+| `num_flaps_x` | int | `1` | Number of flap columns in the jig insert |
+| `num_flaps_y` | int | `6` | Number of flap rows in the jig insert |
+| `gap_x_mm` | float | `6.0` | Horizontal gap between flap pockets (mm) |
+| `gap_y_mm` | float | `6.0` | Vertical gap between flap pockets (mm) |
+| `margin_x_mm` | float | `6.0` | Horizontal margin around the pocket grid inside the insert (mm) |
+| `margin_y_mm` | float | `6.0` | Vertical margin around the pocket grid inside the insert (mm) |
+| `printable_size_x_mm` | float | `88.0` | Width of the printer's printable area (mm). Used as the default canvas width and to anchor insert position. |
+| `printable_size_y_mm` | float | `333.0` | Height of the printer's printable area (mm). Used as the default canvas height. |
+| `printable_origin_x_mm` | float | `5.0` | X position of printable area's lower-left corner in mat absolute coordinates (mm) |
+| `printable_origin_y_mm` | float | `33.0` | Y position of printable area's lower-left corner in mat absolute coordinates (mm) |
+| `insert_origin_x_mm` | float | `16.0` | X position of insert's lower-left corner in mat absolute coordinates (mm) |
+| `insert_origin_y_mm` | float | `49.5` | Y position of insert's lower-left corner in mat absolute coordinates (mm) |
+| `laser_kerf_mm` | float | `0.04` | Inward offset applied to each flap pocket when cutting the insert (tightens fit) |
+| `insert_kerf_mm` | float | `0.04` | Outward offset applied to the insert outline when cutting the outer jig (compensates laser kerf) |
+| `mat_size_x_mm` | float | `97.0` | eufyMake minibed mat outer width (mm) — hardware constant, rarely changed |
+| `mat_size_y_mm` | float | `370.0` | eufyMake minibed mat outer height (mm) — hardware constant, rarely changed |
+| `mat_corner_radius_mm` | float | `7.5` | Mat outer corner radius (mm) |
+| `mat_corner_cut_mm` | float | `22.0` | Mat diagonal corner cut length (mm) at the mat origin corner |
+| `reg_mark_size_mm` | float | `6.0` | L-shaped registration mark arm length (mm) — written to `flap_printer_params.scad` for use by the laser-cut outer jig |
+| `reg_mark_stroke_mm` | float | `1.0` | Registration mark stroke width (mm) |
+
+> **Note:** All jig and mat parameters are written to `pvv_cad/flap_printer_params.scad`
+> on every render. Open `pvv_cad/flap_printer_jigs.scad` in OpenSCAD to generate the
+> laser-cut SVG files for the insert and outer jig.
 
 ### `output` — Output file settings
 
@@ -93,7 +117,7 @@ See `example_job.json` for a complete example. The config has five sections:
 | `labels` | bool | `true` | Render EP slot labels in the gap areas |
 | `label_font_size_pt` | int | `6` | Label font size in points |
 | `output_dir` | string | `"output"` | Output directory (relative paths are resolved against the job file's directory, not CWD) |
-| `canvas_size_mm` | `[w, h]` | _unset_ | Optional output image canvas size in mm. When set, the rendered image is sized to these dimensions without changing physical jig geometry. The canvas top-left aligns with the printable-area origin, so the insert and all flap positions stay fixed; only the surrounding image area grows or shrinks. Omit to use the SCAD printable-area size (88 × 333 mm, matches eufyMake **Zero Point** alignment mode). See note below on eufyMake alignment modes. |
+| `canvas_size_mm` | `[w, h]` | _unset_ | Optional output image canvas size in mm. When set, the rendered image is sized to these dimensions without changing physical jig geometry. The canvas top-left aligns with the printable-area origin, so the insert and all flap positions stay fixed; only the surrounding image area grows or shrinks. Omit to use the jig section's `printable_size_x/y_mm` (default 88 × 333 mm, matches eufyMake **Zero Point** alignment mode). See note below on eufyMake alignment modes. |
 | `registration_marks` | bool | `false` | Draw 5 mm L-shaped registration marks in the 4 corners of the output image to aid alignment debugging. The bottom-right mark is rendered green to indicate the eufyMake Zero-Point origin; the other three are white. |
 | `registration_mark_line_width_mm` | float | `1.0` | Line width (mm) of the registration mark arms. Marks thinner than ~0.5 mm tend not to print reliably on the eufyMake. |
 | `calibration_offset_mm` | `[dx, dy]` | `[0, 0]` | Global mat-calibration offset (mm) applied to every drawn element in the final output image (flap art, ink-save mask, labels, and registration marks all shift together). Use this to compensate for a systematic offset between the printer's zero-point and the physical jig (e.g. eufyMake Zero-Point calibration being off by a couple of mm). Positive `dx` shifts content toward +X in the output image (in landscape orientation this is the long axis); positive `dy` shifts toward +Y. Content shifted past the image edge is clipped. |
@@ -291,13 +315,15 @@ Physical dimensions are resolved using a three-tier chain:
 
 1. **OpenSCAD echo** — Runs `PVV_splitflap_mods.scad` (which includes
    `flap_dimensions.scad`) and parses tagged `FLAP_PRINTER:` echo output.
-   This is the authoritative source. Results are cached in
+   This is the authoritative source for **flap physical dimensions**. Results are cached in
    `.flap_printer_dims.json` next to the `.scad` file (mtime-based invalidation).
-2. **Job config overrides** — Optional `dimensions` section in the JSON config
-   (see below). Useful when OpenSCAD is not installed.
+2. **Job config `jig` section** — Jig and mat parameters come directly from the
+   `jig` section of the job JSON (see above). These are no longer read from SCAD.
 3. **Hardcoded defaults** — Last-resort values baked into `dimensions.py`.
 
-### `dimensions` — Optional dimension overrides
+### `dimensions` — Optional flap dimension overrides
+
+Useful when OpenSCAD is not installed. Jig/mat parameters belong in the `jig` section, not here.
 
 | Key | Type | SCAD Variable | Default |
 |-----|------|---------------|---------|
@@ -305,17 +331,9 @@ Physical dimensions are resolved using a three-tier chain:
 | `flap_height` | float | `flap_height` | `43.0` |
 | `flap_gap` | float | `flap_gap` | `2.0` |
 | `flap_corner_radius` | float | `flap_corner_radius` | `3.1` |
-| `flap_notch_height` | float | `flap_notch_height_default` | `15.0` |
+| `flap_notch_height` | float | `flap_notch_height` | `15.0` |
 | `flap_notch_depth` | float | `flap_notch_depth` | `3.2` |
 | `flap_pin_width` | float | `flap_pin_width` | `1.4` |
-| `jig_num_x` | int | `minibed_flap_jig_num_flaps_x` | `1` |
-| `jig_num_y` | int | `minibed_flap_jig_num_flaps_y` | `6` |
-| `jig_gap_x` | float | `minibed_flap_jig_gap_x` | `6.0` |
-| `jig_gap_y` | float | `minibed_flap_jig_gap_y` | `6.0` |
-| `jig_margin_x` | float | `minibed_flap_jig_margin_x` | `6.0` |
-| `jig_margin_y` | float | `minibed_flap_jig_margin_y` | `6.0` |
-| `printable_width` | float | `minibed_printable_size_x` | `88.0` |
-| `printable_height` | float | `minibed_printable_size_y` | `333.0` |
 
 All fields are optional. Omit the entire section to rely solely on OpenSCAD + hardcoded defaults.
 
