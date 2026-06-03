@@ -10,6 +10,7 @@ from pathlib import Path
 from .config import load_config, print_summary
 from .dimensions import AllDimensions
 from .renderer import render_job
+from .scad_writer import write_flap_printer_params
 
 
 def _find_repo_root() -> Path:
@@ -61,13 +62,24 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # Load dimensions: OpenSCAD → config overrides → hardcoded defaults
+    # Jig + printable area dims come from job config (architectural inversion);
+    # only flap physical dims are still resolved via OpenSCAD echo.
     repo_root = _find_repo_root()
     mods_path = args.scad_mods or (repo_root / 'pvv_cad' / 'PVV_splitflap_mods.scad')
     dims = AllDimensions.from_scad(
         mods_path=mods_path,
         openscad_path=args.openscad,
         overrides=config.dimensions.as_dict(),
+        jig_config=config.jig,
     )
+
+    # Write flap_printer_params.scad so flap_printer_jigs.scad has current values
+    params_path = repo_root / 'pvv_cad' / 'flap_printer_params.scad'
+    try:
+        write_flap_printer_params(params_path, dims, config.jig)
+        logging.info("Wrote %s", params_path)
+    except OSError as e:
+        logging.warning("Could not write flap_printer_params.scad: %s", e)
 
     # Override display dimensions from config if they differ from defaults
     if config.display.module_pitch_mm != dims.display.module_pitch:

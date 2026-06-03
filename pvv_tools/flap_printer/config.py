@@ -36,6 +36,32 @@ class JigConfig:
     type: str = "minibed"
     flip_mode: str = "left-right"       # "left-right" | "front-back"
     output_orientation: str = "landscape"  # "landscape" | "portrait"
+    # Grid parameters
+    num_flaps_x: int = 1
+    num_flaps_y: int = 6
+    gap_x_mm: float = 6.0
+    gap_y_mm: float = 6.0
+    margin_x_mm: float = 6.0
+    margin_y_mm: float = 6.0
+    # Printable area — absolute coordinates on the mat
+    printable_size_x_mm: float = 88.0
+    printable_size_y_mm: float = 333.0
+    printable_origin_x_mm: float = 5.0
+    printable_origin_y_mm: float = 33.0
+    # Insert lower-left corner — absolute coordinates on the mat
+    insert_origin_x_mm: float = 16.0
+    insert_origin_y_mm: float = 49.5
+    # Laser kerf compensations (mm)
+    laser_kerf_mm: float = 0.04
+    insert_kerf_mm: float = 0.04
+    # Mat outer geometry (eufyMake hardware constants)
+    mat_size_x_mm: float = 97.0
+    mat_size_y_mm: float = 370.0
+    mat_corner_radius_mm: float = 7.5
+    mat_corner_cut_mm: float = 22.0
+    # Registration mark geometry (for laser cut outer jig)
+    reg_mark_size_mm: float = 6.0
+    reg_mark_stroke_mm: float = 1.0
 
 
 @dataclass
@@ -207,6 +233,26 @@ def load_config(path: str | Path) -> JobConfig:
         type=_get(j, 'type', 'minibed'),
         flip_mode=_get(j, 'flip_mode', 'left-right'),
         output_orientation=_get(j, 'output_orientation', 'landscape'),
+        num_flaps_x=int(_get(j, 'num_flaps_x', 1)),
+        num_flaps_y=int(_get(j, 'num_flaps_y', 6)),
+        gap_x_mm=float(_get(j, 'gap_x_mm', 6.0)),
+        gap_y_mm=float(_get(j, 'gap_y_mm', 6.0)),
+        margin_x_mm=float(_get(j, 'margin_x_mm', 6.0)),
+        margin_y_mm=float(_get(j, 'margin_y_mm', 6.0)),
+        printable_size_x_mm=float(_get(j, 'printable_size_x_mm', 88.0)),
+        printable_size_y_mm=float(_get(j, 'printable_size_y_mm', 333.0)),
+        printable_origin_x_mm=float(_get(j, 'printable_origin_x_mm', 5.0)),
+        printable_origin_y_mm=float(_get(j, 'printable_origin_y_mm', 33.0)),
+        insert_origin_x_mm=float(_get(j, 'insert_origin_x_mm', 16.0)),
+        insert_origin_y_mm=float(_get(j, 'insert_origin_y_mm', 49.5)),
+        laser_kerf_mm=float(_get(j, 'laser_kerf_mm', 0.04)),
+        insert_kerf_mm=float(_get(j, 'insert_kerf_mm', 0.04)),
+        mat_size_x_mm=float(_get(j, 'mat_size_x_mm', 97.0)),
+        mat_size_y_mm=float(_get(j, 'mat_size_y_mm', 370.0)),
+        mat_corner_radius_mm=float(_get(j, 'mat_corner_radius_mm', 7.5)),
+        mat_corner_cut_mm=float(_get(j, 'mat_corner_cut_mm', 22.0)),
+        reg_mark_size_mm=float(_get(j, 'reg_mark_size_mm', 6.0)),
+        reg_mark_stroke_mm=float(_get(j, 'reg_mark_stroke_mm', 1.0)),
     )
     if jig.flip_mode not in ('left-right', 'front-back'):
         raise ValueError(f"Invalid flip_mode: {jig.flip_mode!r} (expected 'left-right' or 'front-back')")

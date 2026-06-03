@@ -2092,7 +2092,14 @@ module motor_flange_alignment_jig()
 		{
 			rotate([0, 0, i * 90]) translate([motor_coupler_hole_pattern_radius, 0, 0])
 			{
-				cylinder(h=100, r=m3_thru_hole_rad + 0.1, center=true, $fn=30);
+				if (i & 1)
+				{
+					cylinder(h=100, r=m3_cap_screw_head_diameter/2 + 0.1, center=true, $fn=30);
+				}
+				else
+				{
+					cylinder(h=100, r=m3_thru_hole_rad + 0.1, center=true, $fn=30);
+				}
 			}
 		}
 
@@ -2225,197 +2232,20 @@ module print_plate(use_B_mounting_pattern = false)
 
 
 //jig_cutaway();
-//apply_filament_shrinkage_compensation() motor_flange_alignment_jig();
-
-
-// ==========================================================================================================================================================================
-// EUFY MINIBED PROFILE - for cutting mats and similar accessories	
-// 371mm x 69mm    6mm corner rad  22mm corner cut
-// ==========================================================================================================================================================================
-
-minibed_size_y = 370;
-minibed_size_x = 97;
-minibed_cr = 7.5;
-minibed_corner_cut = 22;
-minibed_printable_size_x = 88;    // eufy stufio canvas: 90; measured on mat: 88; official full-flatbed spec says 90
-minibed_printable_size_y = 333;   // eufy stufio canvas: 335; measured on mat: 333; official full-flatbed spec says 330
-minibed_printable_origin_x = 5.0;
-minibed_printable_origin_y = 33.0;
-minibed_reg_mark_size = 6;      // zero-point alignment L-shape arm length
-minibed_reg_mark_stroke = 1;    // zero-point alignment L-shape stroke width
-minibed_reg_mark_origin_x = minibed_printable_origin_x;  // registration box origin X (matches printable area)
-minibed_reg_mark_origin_y = minibed_printable_origin_y;  // registration box origin Y (matches printable area)
-minibed_reg_mark_extent_x = minibed_printable_size_x;    // registration box width  (matches printable area)
-minibed_reg_mark_extent_y = 333;                         // registration box height (measured from minibed mat marks)
-module eufy_minibed_printable_area_profile()
-{
-	translate([minibed_printable_origin_x, minibed_printable_origin_y]) square([minibed_printable_size_x, minibed_printable_size_y], center=false);
-}
-
-module eufy_corner_cut_profile()
-{
-	polygon([
-		[0, 0],
-		[minibed_corner_cut, 0],
-		[0, minibed_corner_cut]
-	]);
-}
-
-module eufy_minibed_mat_profile(bUseCornerCut = true, bUsePrintableAreaCut = true)
-{
-	difference()
-	{
-		pvv_rounded_square([minibed_size_x, minibed_size_y], center=false, cr=minibed_cr, $fn = 30);
-	
-		// Remove corner at origin with diagonal cut
-		if (bUseCornerCut)
-		{
-			eufy_corner_cut_profile();
-		}
-		
-		// Remove printable area with diagonal cut
-		if (bUsePrintableAreaCut)
-		{
-			eufy_minibed_printable_area_profile();
-		}
-	}
-}
-
-//eufy_minibed_mat_profile();
-
-minibed_flap_jig_num_flaps_x = 1;
-minibed_flap_jig_num_flaps_y = 6;
-minibed_flap_jig_laser_kerf_compensation = 0.04; // inward offset to tighten flap pocket fit; increase if flaps are still too loose
-minibed_flap_jig_insert_kerf_compensation = 0.04; // outward offset on insert pocket outline to compensate for laser kerf when cutting the jig itself
-minibed_flap_jig_gap_x = 6;
-minibed_flap_jig_gap_y = 6;
-minibed_flap_jig_margin_x = 6;
-minibed_flap_jig_margin_y = 6;
-minibed_flap_jig_space_x = flap_width + minibed_flap_jig_gap_x;
-minibed_flap_jig_space_y = flap_height + minibed_flap_jig_gap_y;
-minibed_flap_jig_insert_size_x = minibed_flap_jig_space_x * minibed_flap_jig_num_flaps_x - minibed_flap_jig_gap_x + 2*minibed_flap_jig_margin_x;
-minibed_flap_jig_insert_size_y = minibed_flap_jig_space_y * minibed_flap_jig_num_flaps_y - minibed_flap_jig_gap_y + 2*minibed_flap_jig_margin_y;
-
-// Insert origin (lower-left corner) in absolute minibed mat coordinates.
-// Pinned at the values produced by the original centering formula with
-// flap_width=54, flap_height=43, printable=88x333 at (5,33). Held constant
-// so that adjustments to minibed_printable_size_*/minibed_printable_origin_*
-// (e.g. to match eufyMake Studio's 90x335 canvas) do NOT shift the flaps.
-minibed_insert_origin_x = 16;
-minibed_insert_origin_y = 49.5;
-minibed_insert_center_x = minibed_insert_origin_x;
-minibed_insert_center_y = minibed_insert_origin_y;
-echo(minibed_insert_center_x = minibed_insert_center_x);
-echo(minibed_insert_center_y = minibed_insert_center_y);
+apply_filament_shrinkage_compensation() motor_flange_alignment_jig();
 
 // ---- FLAP_PRINTER parameter export (parsed by pvv_tools/flap_printer) ----
+// Jig and mat parameters are now defined in the job JSON config (jig section)
+// and written to pvv_cad/flap_printer_params.scad by pvv_tools.flap_printer.
+// Only flap physical dimensions are echoed here.
 echo(str("FLAP_PRINTER:flap_width=", flap_width));
 echo(str("FLAP_PRINTER:flap_height=", flap_height));
 echo(str("FLAP_PRINTER:flap_gap=", flap_gap));
 echo(str("FLAP_PRINTER:flap_corner_radius=", flap_corner_radius));
-echo(str("FLAP_PRINTER:flap_notch_height_default=", flap_notch_height_default));
+echo(str("FLAP_PRINTER:flap_notch_height=", flap_notch_height));
 echo(str("FLAP_PRINTER:flap_notch_depth=", flap_notch_depth));
 echo(str("FLAP_PRINTER:flap_pin_width=", flap_pin_width));
-echo(str("FLAP_PRINTER:minibed_flap_jig_num_flaps_x=", minibed_flap_jig_num_flaps_x));
-echo(str("FLAP_PRINTER:minibed_flap_jig_num_flaps_y=", minibed_flap_jig_num_flaps_y));
-echo(str("FLAP_PRINTER:minibed_flap_jig_gap_x=", minibed_flap_jig_gap_x));
-echo(str("FLAP_PRINTER:minibed_flap_jig_gap_y=", minibed_flap_jig_gap_y));
-echo(str("FLAP_PRINTER:minibed_flap_jig_margin_x=", minibed_flap_jig_margin_x));
-echo(str("FLAP_PRINTER:minibed_flap_jig_margin_y=", minibed_flap_jig_margin_y));
-echo(str("FLAP_PRINTER:minibed_printable_size_x=", minibed_printable_size_x));
-echo(str("FLAP_PRINTER:minibed_printable_size_y=", minibed_printable_size_y));
-echo(str("FLAP_PRINTER:minibed_printable_origin_x=", minibed_printable_origin_x));
-echo(str("FLAP_PRINTER:minibed_printable_origin_y=", minibed_printable_origin_y));
-echo(str("FLAP_PRINTER:minibed_insert_origin_x=", minibed_insert_origin_x));
-echo(str("FLAP_PRINTER:minibed_insert_origin_y=", minibed_insert_origin_y));
 // ---- end FLAP_PRINTER export ----
-
-module eufy_minibed_flap_jig_insert_profile()
-{
-	translate([minibed_insert_center_x, minibed_insert_center_y]) 
-	{
-		square([minibed_flap_jig_insert_size_x, minibed_flap_jig_insert_size_y], center=false);
-	}
-}
-
-module eufy_minibed_flap_jig_flaps()
-{
-	for (flap_number = [0 : minibed_flap_jig_num_flaps_y - 1])
-	{
-		translate([minibed_insert_center_x + minibed_flap_jig_margin_x, minibed_insert_center_y + minibed_flap_jig_margin_y + flap_number * minibed_flap_jig_space_y, 0])
-		{
-			offset(delta=-minibed_flap_jig_laser_kerf_compensation) flap_2d();
-		}
-	}
-}
-//eufy_minibed_flap_jig_flaps();
-
-module eufy_minibed_registration_marks()
-{
-	// L-shaped marks at the four corners of the registration box,
-	// positioned OUTSIDE the rectangle.
-	s = minibed_reg_mark_size;
-	t = minibed_reg_mark_stroke;
-	x0 = minibed_reg_mark_origin_x;
-	y0 = minibed_reg_mark_origin_y;
-	x1 = minibed_reg_mark_origin_x + minibed_reg_mark_extent_x;
-	y1 = minibed_reg_mark_origin_y + minibed_reg_mark_extent_y;
-
-	// Bottom-left corner: arms run right along bottom edge, up along left edge
-	translate([x0 + t, y0 - t]) square([s - t, t]);
-	translate([x0 - t, y0 + t]) square([t, s - t]);
-
-	// Bottom-right corner: arms run left along bottom edge, up along right edge
-	translate([x1 - s, y0 - t]) square([s - t, t]);
-	translate([x1, y0 + t]) square([t, s - t]);
-
-	// Top-left corner: arms run right along top edge, down along left edge
-	translate([x0 + t, y1]) square([s - t, t]);
-	translate([x0 - t, y1 - s]) square([t, s - t]);
-
-	// Top-right corner: arms run left along top edge, down along right edge
-	translate([x1 - s, y1]) square([s - t, t]);
-	translate([x1, y1 - s]) square([t, s - t]);
-}
-
-module eufy_minibed_flap_jig(bUseCornerCut = true, bGenInsertOnly = true, bUseRegistrationMarks = true)
-{
-	if (bGenInsertOnly)
-	{
-		difference()
-		{
-			offset(delta=minibed_flap_jig_insert_kerf_compensation) eufy_minibed_flap_jig_insert_profile();
-			eufy_minibed_flap_jig_flaps();
-		}
-	}
-	else
-	{
-		difference()
-		{
-			pvv_rounded_square([minibed_size_x, minibed_size_y], center=false, cr=minibed_cr, $fn = 30);
-		
-			// Remove corner at origin with diagonal cut
-			if (bUseCornerCut)
-			{
-				eufy_corner_cut_profile();
-			}
-			eufy_minibed_flap_jig_insert_profile();
-			if (bUseRegistrationMarks)
-			{
-				eufy_minibed_registration_marks();
-			}
-			// Fingernail relief at insert origin corner for lifting the insert mat
-			translate([minibed_insert_center_x, minibed_insert_center_y]) circle(r = 5, $fn = 60);
-		}
-	}
-}
-
-eufy_minibed_flap_jig(bGenInsertOnly = false);
-
-// ==========================================================================================================================================================================
-// Flap Jig for EUFY MINIBED
-// ==========================================================================================================================================================================
-
 
 
 //flap_number = 1;
@@ -2426,11 +2256,6 @@ module flap_lineup()
 		translate([flap_number * 55, 0, 0])
 		{
 			flap_with_letters([1,0,0], [1,1,0], flap_index=flap_number, flap_gap=flap_gap, bleed=2);
-			// translate([0, -flap_pin_width-flap_gap, 0])
-			// rotate([180, 0, 0])
-			// {
-			// 	flap_with_letters([1,0,0], [1,1,0], flap_index=((flap_number - 1) + num_flaps) % num_flaps, flap_gap=flap_gap, bleed=2);
-			// }
 		}
 	}
 }

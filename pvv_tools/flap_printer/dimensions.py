@@ -11,9 +11,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from .scad_parser import run_openscad
+
+if TYPE_CHECKING:
+    from .config import JigConfig
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +82,7 @@ class PrintableAreaDimensions:
     coordinates exported from SCAD; they enable that override in cli.py.
     """
     width: float = 88.0           # mm — canvas width  (defaults to minibed_printable_size_x)
-    height: float = 330.0         # mm — canvas height (defaults to minibed_printable_size_y)
+    height: float = 333.0         # mm — canvas height (defaults to minibed_printable_size_y)
     insert_offset_x: float = 11.0 # mm — insert X within canvas
     insert_offset_y: float = 15.0 # mm — insert Y within canvas
     # Raw absolute mat coordinates (from SCAD); used when canvas is overridden
@@ -108,6 +111,7 @@ class AllDimensions:
         mods_path: Optional[str | Path] = None,
         openscad_path: Optional[str] = None,
         overrides: Optional[dict[str, float]] = None,
+        jig_config: Optional['JigConfig'] = None,
     ) -> AllDimensions:
         """Load dimensions with two-tier fallback: OpenSCAD → overrides → hardcoded.
 
@@ -118,6 +122,9 @@ class AllDimensions:
             overrides: Optional dict of dimension fallbacks from the job config
                        (DimensionOverrides.as_dict()).  Values here fill in any
                        gaps left when OpenSCAD is unavailable.
+            jig_config: When provided, jig grid + printable area dims are taken
+                        directly from the job JSON (not from SCAD echoes).  Flap
+                        physical dims are still resolved via SCAD.
         """
         # Tier 1: OpenSCAD echo extraction
         scad_vals: dict[str, float] = {}
@@ -153,47 +160,55 @@ class AllDimensions:
             pin_width=_get('flap_pin_width', 1.4),
         )
 
-        jig = JigDimensions(
-            num_x=int(_get('minibed_flap_jig_num_flaps_x', 1)),
-            num_y=int(_get('minibed_flap_jig_num_flaps_y', 6)),
-            gap_x=_get('minibed_flap_jig_gap_x', 6.0),
-            gap_y=_get('minibed_flap_jig_gap_y', 6.0),
-            margin_x=_get('minibed_flap_jig_margin_x', 6.0),
-            margin_y=_get('minibed_flap_jig_margin_y', 6.0),
-        )
-
-        # Insert offset within the printable area.
-        # Preferred: derive from explicit SCAD-exported insert + printable origins
-        # (minibed_insert_origin_x/y and minibed_printable_origin_x/y), so the
-        # insert position is decoupled from changes to printable_size_*.
-        # Fallback: legacy centering computation.
-        insert_w, insert_h = jig.insert_size(flap)
-        printable_w = _get('minibed_printable_size_x', 88.0)
-        printable_h = _get('minibed_printable_size_y', 330.0)
-        printable_origin_x = _get('minibed_printable_origin_x', 5.0)
-        printable_origin_y = _get('minibed_printable_origin_y', 33.0)
-        if ('minibed_insert_origin_x' in scad_vals
-                and 'minibed_printable_origin_x' in scad_vals):
-            insert_origin_x = scad_vals['minibed_insert_origin_x']
-            insert_origin_y = scad_vals['minibed_insert_origin_y']
-            insert_offset_x = insert_origin_x - printable_origin_x
-            insert_offset_y = insert_origin_y - printable_origin_y
+        if jig_config is not None:
+            # Jig config present — take all jig + printable dims directly from job JSON.
+            jig = JigDimensions(
+                num_x=jig_config.num_flaps_x,
+                num_y=jig_config.num_flaps_y,
+                gap_x=jig_config.gap_x_mm,
+                gap_y=jig_config.gap_y_mm,
+                margin_x=jig_config.margin_x_mm,
+                margin_y=jig_config.margin_y_mm,
+            )
+            printable = PrintableAreaDimensions(
+                width=jig_config.printable_size_x_mm,
+                height=jig_config.printable_size_y_mm,
+                insert_offset_x=jig_config.insert_origin_x_mm - jig_config.printable_origin_x_mm,
+                insert_offset_y=jig_config.insert_origin_y_mm - jig_config.printable_origin_y_mm,
+                printable_origin_x=jig_config.printable_origin_x_mm,
+                printable_origin_y=jig_config.printable_origin_y_mm,
+                insert_origin_x=jig_config.insert_origin_x_mm,
+                insert_origin_y=jig_config.insert_origin_y_mm,
+            )
         else:
+            # Legacy: resolve jig + printable dims from SCAD echoes / overrides / defaults.
+            jig = JigDimensions(
+                num_x=int(_get('minibed_flap_jig_num_flaps_x', 1)),
+                num_y=int(_get('minibed_flap_jig_num_flaps_y', 6)),
+                gap_x=_get('minibed_flap_jig_gap_x', 6.0),
+                gap_y=_get('minibed_flap_jig_gap_y', 6.0),
+                margin_x=_get('minibed_flap_jig_margin_x', 6.0),
+                margin_y=_get('minibed_flap_jig_margin_y', 6.0),
+            )
+            insert_w, insert_h = jig.insert_size(flap)
+            printable_w = _get('minibed_printable_size_x', 88.0)
+            printable_h = _get('minibed_printable_size_y', 333.0)
+            printable_origin_x = _get('minibed_printable_origin_x', 5.0)
+            printable_origin_y = _get('minibed_printable_origin_y', 33.0)
             insert_offset_x = (printable_w - insert_w) / 2.0
             insert_offset_y = (printable_h - insert_h) / 2.0
             insert_origin_x = insert_offset_x + printable_origin_x
             insert_origin_y = insert_offset_y + printable_origin_y
-
-        printable = PrintableAreaDimensions(
-            width=printable_w,
-            height=printable_h,
-            insert_offset_x=insert_offset_x,
-            insert_offset_y=insert_offset_y,
-            printable_origin_x=printable_origin_x,
-            printable_origin_y=printable_origin_y,
-            insert_origin_x=insert_origin_x,
-            insert_origin_y=insert_origin_y,
-        )
+            printable = PrintableAreaDimensions(
+                width=printable_w,
+                height=printable_h,
+                insert_offset_x=insert_offset_x,
+                insert_offset_y=insert_offset_y,
+                printable_origin_x=printable_origin_x,
+                printable_origin_y=printable_origin_y,
+                insert_origin_x=insert_origin_x,
+                insert_origin_y=insert_origin_y,
+            )
 
         display = DisplayDimensions(
             module_width=flap.width,
