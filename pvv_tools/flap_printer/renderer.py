@@ -70,6 +70,12 @@ def _resolve_flaps_for_module(
             results.append((blank, blank, cf.label))
 
         elif cf.type == "single":
+            if not cf.enabled:
+                flap_w = mm_to_px(dims.flap.width, dpi)
+                flap_h = mm_to_px(dims.flap.height, dpi)
+                blank = Image.new('RGBA', (flap_w, flap_h), (0, 0, 0, 0))
+                results.append((blank, blank, cf.label))
+                continue
             # Single-module images apply to every module identically
             target_w = mm_to_px(dims.flap.width, dpi)
             target_h = mm_to_px(dims.flap.display_height, dpi)
@@ -94,6 +100,13 @@ def _resolve_flaps_for_module(
             start_mod, end_mod = cf.module_range
             if not (start_mod <= module_index <= end_mod):
                 continue  # This image doesn't cover this module
+
+            if not cf.enabled:
+                flap_w = mm_to_px(dims.flap.width, dpi)
+                flap_h = mm_to_px(dims.flap.height, dpi)
+                blank = Image.new('RGBA', (flap_w, flap_h), (0, 0, 0, 0))
+                results.append((blank, blank, cf.label))
+                continue
 
             target_h = mm_to_px(dims.flap.display_height, dpi)
             img = _load_source_image(cf, target_h)

@@ -46,12 +46,13 @@ def _find_openscad(openscad_path: Optional[str] = None) -> Optional[str]:
     if found:
         return found
 
-    # Windows default install paths
+    # Windows default install paths — nightly before stable so newer build is preferred
     for prog_dir in [os.environ.get("ProgramFiles", ""), os.environ.get("ProgramFiles(x86)", "")]:
         if prog_dir:
-            candidate = os.path.join(prog_dir, "OpenSCAD", "openscad.exe")
-            if os.path.isfile(candidate):
-                return candidate
+            for subdir in ["OpenSCAD (Nightly)", "OpenSCAD"]:
+                candidate = os.path.join(prog_dir, subdir, "openscad.exe")
+                if os.path.isfile(candidate):
+                    return candidate
 
     return None
 

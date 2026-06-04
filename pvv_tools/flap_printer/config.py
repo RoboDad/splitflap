@@ -119,6 +119,7 @@ class CustomFlap:
     scale: Optional[tuple[float, float]] = None
     crop: Optional[tuple[float, float, float, float]] = None  # (left%, top%, right%, bottom%)
     fit_mode: Optional[str] = None  # per-image override; None = use global default
+    enabled: bool = True  # False → output is 100% transparent; slot position preserved
 
     # Resolved at load time
     source_path: Optional[Path] = None
@@ -354,6 +355,7 @@ def load_config(path: str | Path) -> JobConfig:
             scale=tuple(scale) if scale else None,
             crop=tuple(crop) if crop else None,
             fit_mode=cf.get('fit_mode', None),
+            enabled=bool(cf.get('enabled', True)),
             source_path=source_path,
         )
 
@@ -422,5 +424,6 @@ def print_summary(config: JobConfig) -> None:
         else:
             exists = "MISSING"
         fit_info = f", fit={cf.fit_mode}" if cf.fit_mode else ""
-        print(f"    [{cf.label}] slot={cf.slot}, type={cf.type}{mod_info}{fit_info}, "
+        disabled_info = " [DISABLED]" if not cf.enabled else ""
+        print(f"    [{cf.label}] slot={cf.slot}, type={cf.type}{mod_info}{fit_info}{disabled_info}, "
               f"source={cf.source} ({exists})")
