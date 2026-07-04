@@ -39,6 +39,7 @@ __pycache__/
 # Flap printer test/scratch output directories
 pvv_tools/test_output/
 pvv_tools/output/
+pvv_tools/prototype_output/
 
 # Windows Explorer metadata
 desktop.ini

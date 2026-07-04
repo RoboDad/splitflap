@@ -15,3 +15,13 @@ chcp 65001 > nul
 
 python pvv_tools\download_emoji.py "❤️"  --name heart
 python pvv_tools\download_emoji.py "👋🏽"
+python pvv_tools\download_emoji.py "🐔" --name chicken
+python pvv_tools\download_emoji.py "😂" --name joy
+python pvv_tools\download_emoji.py "😭" --name sob
+python pvv_tools\download_emoji.py "🙏" --name pray
+python pvv_tools\download_emoji.py "🤣" --name rofl
+python pvv_tools\download_emoji.py "👍" --name thumbs_up
+python pvv_tools\download_emoji.py "😘" --name kiss
+python pvv_tools\download_emoji.py "😊" --name smile
+python pvv_tools\download_emoji.py "😍" --name heart_eyes
+python pvv_tools\download_emoji.py "🥰" --name smiling_face_with_hearts

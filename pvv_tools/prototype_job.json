@@ -4,6 +4,12 @@
     "module_pitch_mm": 64.0,
     "inter_module_gap_mm": 10.0
   },
+  "preview": {
+    "enabled": true,
+    "columns": 12,
+    "flap_color": [0, 0, 0],
+    "background_color": [180, 180, 180]
+  },
   "jig": {
     "type": "minibed",
     "flip_mode": "left-right",
@@ -35,10 +41,10 @@
   "custom_flaps": [
     {"slot":  0, "label": "PVV42", "type": "epilogue", "char": "-"},
     {"slot":  1, "label": "PVV43", "type": "epilogue", "char": "$"},
-    {"slot":  2, "label": "PVV44", "type": "single", "source": "test_images/placeholders/WoodGathering.PNG"},
+    {"slot":  2, "label": "PVV44", "type": "single", "source": "test_images/placeholders/WoodGathering.PNG", "notch_mode": "inset"},
     {"slot":  3, "label": "PVV45", "type": "emoji", "name": "heart", "enabled": true},
-    {"slot":  4, "label": "PVV46", "type": "single", "source": "test_images/placeholders/EP46.svg"},
-    {"slot":  5, "label": "PVV47", "type": "single", "source": "test_images/placeholders/EP47.svg"},
+    {"slot":  4, "label": "PVV46", "type": "emoji", "name": "heart", "notch_mode": "inset"},
+    {"slot":  5, "label": "PVV47", "type": "emoji", "name": "heart", "notch_mode": "squeeze"},
     {"slot":  6, "label": "PVV48", "type": "single", "source": "test_images/placeholders/EP48.svg"},
     {"slot":  7, "label": "PVV49", "type": "single", "source": "test_images/placeholders/EP49.svg"},
     {"slot":  8, "label": "PVV50", "type": "single", "source": "test_images/placeholders/EP50.svg"},
