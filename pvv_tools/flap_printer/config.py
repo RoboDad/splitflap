@@ -142,6 +142,7 @@ class CustomFlap:
     fit_mode: Optional[str] = None    # per-image override; None = use global default
     notch_mode: Optional[tuple[str, str]] = None  # (left, right); None = use global default
     bleed: bool = True   # False → skip bleed edge-expansion for this image (ink-save mask still applied)
+    offset_mm: Optional[tuple[float, float]] = None  # [dx_mm, dy_mm] shift applied after fit, before slicing
     enabled: bool = True  # False → output is 100% transparent; slot position preserved
 
     # Resolved at load time
@@ -224,12 +225,12 @@ def _get(d: dict, key: str, default=None):
     return val if val is not None else default
 
 
-def _parse_offset(raw) -> tuple[float, float]:
+def _parse_offset(raw, field_name: str = 'offset') -> tuple[float, float]:
     """Parse a [dx, dy] offset list/tuple into a (float, float) tuple."""
     if raw is None:
         return (0.0, 0.0)
     if len(raw) != 2:
-        raise ValueError("output.calibration_offset_mm must be [dx_mm, dy_mm]")
+        raise ValueError(f"{field_name} must be [dx_mm, dy_mm]")
     return (float(raw[0]), float(raw[1]))
 
 
@@ -354,7 +355,8 @@ def load_config(path: str | Path) -> JobConfig:
         canvas_size_mm=canvas_size,
         registration_marks=_get(o, 'registration_marks', False),
         registration_mark_line_width_mm=_get(o, 'registration_mark_line_width_mm', 1.0),
-        calibration_offset_mm=_parse_offset(_get(o, 'calibration_offset_mm', [0.0, 0.0])),
+        calibration_offset_mm=_parse_offset(_get(o, 'calibration_offset_mm', [0.0, 0.0]),
+                                            'output.calibration_offset_mm'),
     )
 
     # Global transforms
@@ -480,6 +482,7 @@ def load_config(path: str | Path) -> JobConfig:
             fit_mode=cf.get('fit_mode', None),
             notch_mode=_parse_notch_mode(cf['notch_mode'], f"custom_flaps[{i}].notch_mode") if cf.get('notch_mode') is not None else None,
             bleed=bool(cf.get('bleed', True)),
+            offset_mm=_parse_offset(cf['offset_mm'], f'custom_flaps[{i}].offset_mm') if cf.get('offset_mm') is not None else None,
             enabled=bool(cf.get('enabled', True)),
             source_path=source_path,
         )

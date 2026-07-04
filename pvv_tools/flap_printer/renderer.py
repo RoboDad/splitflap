@@ -76,6 +76,16 @@ def _render_custom_flap_images(
     # Per-flap bleed override: bleed=False suppresses edge expansion for this image
     effective_bleed_px = bleed_px if cf.bleed else 0
 
+    def _apply_offset(img: Image.Image) -> Image.Image:
+        """Shift image content by cf.offset_mm within a canvas of the same size."""
+        if cf.offset_mm is None or (cf.offset_mm[0] == 0.0 and cf.offset_mm[1] == 0.0):
+            return img
+        dx_px = round(cf.offset_mm[0] * dpi / 25.4)
+        dy_px = round(cf.offset_mm[1] * dpi / 25.4)
+        canvas = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        canvas.paste(img, (dx_px, dy_px), img)
+        return canvas
+
     if cf.type == "single":
         target_w = mm_to_px(dims.flap.width, dpi)
         target_h = mm_to_px(dims.flap.display_height, dpi)
@@ -88,6 +98,7 @@ def _render_custom_flap_images(
         notch = cf.notch_mode or config.global_transforms.notch_mode
         notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
         img = fit_with_notch_mode(img, target_w, target_h, fit, notch[0], notch[1], notch_inset_px, effective_bleed_px)
+        img = _apply_offset(img)
         bleed_y = max(0, (img.height - mm_to_px(dims.flap.display_height, dpi)) // 2)
         return slice_display_image(img, dims.flap, dpi, bleed_y=bleed_y)
 
@@ -114,6 +125,7 @@ def _render_custom_flap_images(
         flap_w_px = mm_to_px(dims.flap.width, dpi)
         flap_display_h = mm_to_px(dims.flap.display_height, dpi)
         column = fit_with_notch_mode(column, flap_w_px, flap_display_h, fit, notch[0], notch[1], notch_inset_px, effective_bleed_px)
+        column = _apply_offset(column)
         bleed_y = max(0, (column.height - mm_to_px(dims.flap.display_height, dpi)) // 2)
         return slice_display_image(column, dims.flap, dpi, bleed_y=bleed_y)
 

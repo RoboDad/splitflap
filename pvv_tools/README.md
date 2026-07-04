@@ -219,6 +219,7 @@ An array of objects, one per custom flap. Required fields: `slot`, `source`.
 | `crop` | [L, T, R, B] | `null` | Per-image crop override `[left%, top%, right%, bottom%]`; `null` = use global |
 | `fit_mode` | string | `null` | Per-image fit mode override; `null` = use global default |
 | `notch_mode` | string or `[left, right]` | `null` | Per-image notch-clearance override; `null` = use global default |
+| `offset_mm` | `[dx, dy]` | `null` | Shift image content by `[dx_mm, dy_mm]` within the pocket, applied after all fit/notch transforms and before the ink-save mask. Positive X shifts right, positive Y shifts down. Content pushed past the pocket edge is clipped by the ink-save mask. Useful for fine-tuning the position of an image within its flap without recompositing the source artwork. |
 | `bleed` | bool | `true` | When `false`, skips bleed edge-expansion for this image (the ink-save mask still applies). Useful for images with transparent backgrounds at their edges that don't need the misalignment buffer. |
 | `enabled` | bool | `true` | When `false`, output for this flap is fully transparent; the slot position is preserved in the layout. Useful for temporarily disabling a slot without removing it from the config. |
 
