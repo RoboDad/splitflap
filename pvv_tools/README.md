@@ -8,11 +8,32 @@ Eufy E1 printer, using a laser-cut flap jig.
 All commands must be run from the **repo root** directory
 (`splitflap/`), because Python needs to find the `pvv_tools/` package.
 
-```bash
+### First-time setup (one-off)
+
+Create a virtual environment and install all dependencies:
+
+```powershell
 cd c:\Users\phgev\Documents\Make\Splitflap\Firmware\splitflap
 
-# Install dependencies (once)
-pip install -r requirements.txt
+# Create the venv (once per machine)
+python -m venv .venv
+
+# Activate it (required every new terminal session)
+.venv\Scripts\Activate.ps1          # PowerShell
+# or: .venv\Scripts\activate.bat   # Command Prompt / batch files
+
+# Install dependencies
+pip install -r pvv_tools\requirements.txt      # flap_printer packages
+pip install -r 3d\scripts\requirements.txt     # needed by the glyph generator
+```
+
+The `.venv` folder is gitignored — everyone who clones the repo does this once.
+Re-run the `pip install` lines any time `requirements.txt` changes.
+
+### Running the tool
+
+```powershell
+# Make sure the venv is active first (see above)
 
 # Dry run — validate config and show summary
 python -m pvv_tools.flap_printer pvv_tools/example_job.json --dry-run
@@ -265,6 +286,19 @@ image is fit to the physical target size using the active `fit_mode`.
   fill for dark flap stock. Re-run the generator with `--fill-color` to
   change the color — see
   [Glyph generator](#glyph-generator-generate_epilogue_flap_svgspy).
+- **`emoji`**: Resolves to a Twemoji SVG from `assets/emoji/`. Download SVGs
+  first with `pvv_tools/download_emoji.py`, then optionally hand-edit the SVG
+  (colors, stroke weights) before committing. Specify the emoji with `name`
+  (the filename stem) or `char` (auto-resolved to CLDR name at load time).
+  Example:
+
+  ```json
+  {"slot": 3, "type": "emoji", "name": "waving-hand-medium-skin-tone"},
+  {"slot": 4, "type": "emoji", "char": "❤️"}
+  ```
+
+  Source: Twemoji (Twitter/X), CC-BY 4.0 — covers Unicode 14.0 / ~3,600 emoji.
+  See [Emoji downloader](#emoji-downloader-download_emojipypy).
 
 ### SVG Inputs
 
@@ -410,7 +444,9 @@ pvv_tools/
     flap_glyphs/
       Epilogue/                 # Pre-rendered flap_NN.svg + index.json
       <OtherFont>/              # Generated on demand, committed after review
+    emoji/                      # Downloaded Twemoji SVGs, hand-editable
   generate_epilogue_flap_svgs.py  # CLI that generates assets/flap_glyphs/<font>/
+  download_emoji.py               # CLI that downloads assets/emoji/<name>.svg
   example_job.json
 ```
 
@@ -495,6 +531,37 @@ Output is written to `pvv_tools/assets/flap_glyphs/<font>/`. After
 reviewing the SVGs (and optionally hand-editing fill colors or adjusting
 geometry), commit the directory to make it available to job configs via
 `{"type": "glyph", "font": "<font>", ...}`.
+
+### Emoji downloader (`download_emoji.py`)
+
+Downloads a single Twemoji SVG for use as an `"emoji"` flap type.
+
+```powershell
+# Download by emoji character (name auto-derived from CLDR)
+python pvv_tools/download_emoji.py "👋🏽"
+# → assets/emoji/waving-hand-medium-skin-tone.svg
+
+# Override the name
+python pvv_tools/download_emoji.py "❤️" --name heart
+# → assets/emoji/heart.svg
+```
+
+The script prints the job JSON snippet to use:
+```
+Job JSON (by name — explicit, edit-safe):
+  {"type": "emoji", "name": "waving-hand-medium-skin-tone"}
+
+Job JSON (by char — auto-resolves name at load time):
+  {"type": "emoji", "char": "👋🏽"}
+```
+
+After downloading, open the SVG in any editor to adjust colors or style,
+then commit `pvv_tools/assets/emoji/` to make it available to job configs.
+
+Source: [Twemoji](https://github.com/twitter/twemoji) (Twitter/X), CC-BY 4.0.
+Covers Unicode 14.0 / Emoji 14.0 (~3,600 emoji). Browse at
+[twemoji-cheatsheet.vercel.app](https://twemoji-cheatsheet.vercel.app/) or
+[emojipedia.org](https://emojipedia.org) (select the Twemoji style).
 
 For each of the 52 characters it:
 

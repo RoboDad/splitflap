@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 # repo so flap_printer has no runtime OpenSCAD dependency for glyph types.
 _GLYPH_ASSETS_DIR = Path(__file__).resolve().parent.parent / 'assets' / 'flap_glyphs'
 
+# Downloaded Twemoji SVGs for the "emoji" flap type.
+# Populated by pvv_tools/download_emoji.py; files may be hand-edited before
+# committing.  Files are named by CLDR short name, e.g. heart.svg.
+_EMOJI_ASSETS_DIR = Path(__file__).resolve().parent.parent / 'assets' / 'emoji'
+
 # Must stay in sync with 3d/flap_characters.scad and CHARACTER_LIST
 # in pvv_tools/generate_epilogue_flap_svgs.py.
 _FLAP_CHARACTER_LIST = " ABCDEFGHIJKLMNOPQRSTUVWXYZg0123456789r.?-$'#yp,!@&w"
@@ -300,6 +305,38 @@ def load_config(path: str | Path) -> JobConfig:
             raise ValueError(f"custom_flaps[{i}]: 'slot' is required")
 
         flap_type = cf.get('type', 'single')
+
+        # "emoji" resolves to a hand-edited Twemoji SVG from assets/emoji/.
+        # Download SVGs first with: python pvv_tools/download_emoji.py "<char>"
+        if flap_type == 'emoji':
+            emoji_name = cf.get('name')
+            emoji_char = cf.get('char')
+            if emoji_name is None and emoji_char is None:
+                raise ValueError(
+                    f"custom_flaps[{i}]: type 'emoji' requires 'name' or 'char'")
+            if emoji_name is None:
+                # Resolve char → CLDR name, same logic as download_emoji.py.
+                try:
+                    import emoji as emoji_lib
+                    demojized = emoji_lib.demojize(emoji_char, language='en')
+                    if demojized.startswith(':') and demojized.endswith(':') and demojized.count(':') == 2:
+                        emoji_name = demojized.strip(':').replace('_', '-')
+                except ImportError:
+                    pass
+                if emoji_name is None:
+                    emoji_name = '-'.join(
+                        f'{ord(c):x}' for c in emoji_char if ord(c) != 0xFE0F)
+            svg_path = _EMOJI_ASSETS_DIR / f'{emoji_name}.svg'
+            if not svg_path.is_file():
+                hint = f'python pvv_tools/download_emoji.py "{emoji_char}"' \
+                    if emoji_char else f'python pvv_tools/download_emoji.py "<emoji>" --name {emoji_name}'
+                raise ValueError(
+                    f"custom_flaps[{i}]: emoji SVG not found: {svg_path}\n"
+                    f"  Download it with: {hint}")
+            cf['source'] = str(svg_path)
+            flap_type = 'single'
+            if 'label' not in cf:
+                cf['label'] = emoji_name[:14]
 
         # "epilogue" is a backward-compatible alias for "glyph" with
         # font="Epilogue".
