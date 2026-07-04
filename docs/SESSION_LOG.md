@@ -267,3 +267,44 @@ Also improve setup docs and add batch convenience scripts.
 - Color fonts (Segoe UI Emoji etc.) can't be used in OpenSCAD; emoji path uses pre-built SVGs.
 - `chcp 65001` in batch files fixes cmd.exe code page mangling of emoji literals.
 - `--codepoints 2764-fe0f` is the reliable fallback when literal chars still corrupt.
+
+## 2026-07-03 - flap_printer: notch_mode, module preview, per-side notch
+
+- **Model:** Claude Sonnet 4.6
+- **Commits:** 7ab1064, 500802e, 39fe9f0, 0389ba3, 325dbcf, d481c55
+- **Files touched:**
+  - `pvv_tools/flap_printer/config.py` (notch_mode, PreviewConfig, _parse_notch_mode)
+  - `pvv_tools/flap_printer/slicer.py` (fit_with_notch_mode — symmetric then per-side)
+  - `pvv_tools/flap_printer/renderer.py` (refactored _render_custom_flap_images, preview call)
+  - `pvv_tools/flap_printer/previewer.py` (new — contact-sheet preview generator)
+  - `pvv_tools/README.md` (notch_mode, preview, enabled, type list, source exceptions)
+  - `pvv_tools/gen_emojis.bat` (user added 10 more emoji)
+  - `pvv_tools/prototype_job.json` (preview section, notch_mode tests)
+  - `.gitignore` (prototype_output/ ignored; desktop.ini untracked)
+
+### Goal
+Add notch_mode image modifier, a contact-sheet module preview image, and per-side
+independent notch control. Also housekeeping (gitignore, README audit).
+
+### Changes
+- `notch_mode`: new per-flap/global modifier — `"none"` / `"inset"` / `"squeeze"`.
+  Inset fits image to safe content width; squeeze fits full width then squishes.
+  Initially symmetric; expanded to per-side list `["left", "right"]` (Option B).
+  Internally normalized to `(left, right)` tuple at config load; squeeze wins if sides differ.
+- **Module preview**: `preview` config section generates a contact-sheet PNG at a
+  separate low DPI (default 96). Each cell shows the physical flap shape (rounded
+  outer corners + spool-pin notch cutouts) with artwork composited on top.
+  Label below each cell shows both `label` and `slot` index.
+- Renderer refactored: extracted `_render_custom_flap_images` helper so preview
+  collection (`_collect_preview_entries`) and print pipeline share the same logic.
+- README fully audited and fixed (enabled field, source exceptions, type list,
+  pipeline steps, notch_mode sections with examples, preview section).
+- Repo memory rule written: `flap_printer_readme_rule.md` with per-feature checklist.
+- `prototype_output/` removed from git tracking; `desktop.ini` untracked.
+
+### Notes / decisions
+- Per-side list form: `["inset", "none"]` = left inset only; backward-compat with string.
+- Preview runs a separate render pass at preview DPI (not reusing print-DPI images)
+  to keep the code clean; negligible extra time at 96 DPI.
+- `vscode_askQuestions` tool auto-dismissed in this session (known VS Code issue in
+  agent mode); plain chat Q&A used instead.
