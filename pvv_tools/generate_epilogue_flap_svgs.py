@@ -7,11 +7,14 @@ Scott's projection_renderer pipeline (3d/scripts/) to produce a single
 SVG that depicts that character's full display face (top half + bottom
 half, no flap outline).
 
-Outputs are written to pvv_tools/assets/epilogue_flaps/ as flap_NN.svg
+Outputs are written to pvv_tools/assets/flap_glyphs/<font>/ as flap_NN.svg
 (0-padded indices) along with index.json mapping indices to characters.
+The default output directory is auto-computed from --font; override with
+--output-dir if needed.
 
 Run once per font change; the resulting SVGs are committed and used by
-the ``"epilogue"`` flap type in job configs.
+the ``"glyph"`` (and backward-compat ``"epilogue"``) flap types in job
+configs.
 """
 
 from __future__ import annotations
@@ -143,9 +146,9 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output-dir', type=Path,
-                        default=_REPO_ROOT / 'pvv_tools' / 'assets' / 'epilogue_flaps',
-                        help='Where to write flap_NN.svg files')
+    parser.add_argument('--output-dir', type=Path, default=None,
+                        help='Where to write flap_NN.svg files. '
+                             'Defaults to pvv_tools/assets/flap_glyphs/<font>.')
     parser.add_argument('--font', default='Epilogue',
                         help='Font preset name (see 3d/flap_fonts.scad)')
     parser.add_argument('--bleed', type=float, default=0.0,
@@ -160,6 +163,8 @@ def main() -> int:
     parser.add_argument('--only', type=int, default=None,
                         help='Render only this index (for debugging)')
     args = parser.parse_args()
+    if args.output_dir is None:
+        args.output_dir = _REPO_ROOT / 'pvv_tools' / 'assets' / 'flap_glyphs' / args.font
 
     scad_path = _REPO_ROOT / 'pvv_tools' / 'scad' / 'epilogue_flap_single.scad'
     if not scad_path.exists():

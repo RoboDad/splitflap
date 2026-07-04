@@ -243,23 +243,28 @@ image is fit to the physical target size using the active `fit_mode`.
   Requires `module_range: [start, end]` (inclusive). The tool extracts
   the correct column for each module automatically. Raster or SVG.
 - **`blank`**: Fully transparent top/bottom halves. No source required.
-- **`epilogue`**: Shorthand for `single` using one of the bundled
-  pre-rendered Epilogue-font flap SVGs (the standard 52-character set
-  from Scott Bezek's splitflap project — A-Z, 0-9, space, punctuation).
-  Specify the character via either `char` (e.g. `"H"`) or `index`
-  (0–51). No `source` field needed; the tool resolves to
-  `pvv_tools/assets/epilogue_flaps/flap_NN.svg`. Example:
+- **`glyph`**: Resolves to a pre-rendered per-character SVG from
+  `assets/flap_glyphs/<font>/`. Specify the font with `font` (default
+  `"Epilogue"`), and the character via either `char` or `index` (0–51).
+  No `source` field needed. Example:
 
   ```json
-  {"slot": 0, "type": "epilogue", "char": "H"},
-  {"slot": 1, "type": "epilogue", "index": 5}
+  {"slot": 0, "type": "glyph", "font": "Epilogue", "char": "H"},
+  {"slot": 1, "type": "glyph", "font": "Roboto",   "char": "H"}
   ```
 
-  The bundled assets are pre-rendered with a **white** (`#ffffff`) fill,
-  intended for printing on dark flap stock. To regenerate them in a
-  different color (e.g. black for white stock), re-run the Epilogue
-  generator with `--fill-color` — see
-  [Epilogue generator](#epilogue-generator-generate_epilogue_flap_svgspy).
+  Assets must exist under `assets/flap_glyphs/<font>/` — run the
+  [glyph generator](#glyph-generator-generate_epilogue_flap_svgspy) first
+  for any font other than Epilogue (which ships pre-rendered). The SVG
+  files can be hand-edited (e.g. to change fill color) after generation.
+- **`epilogue`**: Backward-compatible alias for `{"type": "glyph", "font": "Epilogue"}`.
+  The `font` field is ignored; Epilogue is always used. Existing job files
+  using `"type": "epilogue"` continue to work without changes.
+
+  The bundled Epilogue assets are pre-rendered with a **white** (`#ffffff`)
+  fill for dark flap stock. Re-run the generator with `--fill-color` to
+  change the color — see
+  [Glyph generator](#glyph-generator-generate_epilogue_flap_svgspy).
 
 ### SVG Inputs
 
@@ -400,10 +405,12 @@ pvv_tools/
     labels.py           # EP label rendering
     renderer.py         # Pipeline orchestrator (load -> slice -> layout -> save)
   scad/
-    epilogue_flap_single.scad   # SCAD wrapper used by the Epilogue generator
+    epilogue_flap_single.scad   # SCAD wrapper used by the glyph generator
   assets/
-    epilogue_flaps/             # Pre-rendered flap_NN.svg + index.json
-  generate_epilogue_flap_svgs.py  # CLI that regenerates assets/epilogue_flaps/
+    flap_glyphs/
+      Epilogue/                 # Pre-rendered flap_NN.svg + index.json
+      <OtherFont>/              # Generated on demand, committed after review
+  generate_epilogue_flap_svgs.py  # CLI that generates assets/flap_glyphs/<font>/
   example_job.json
 ```
 
@@ -412,7 +419,7 @@ pvv_tools/
 1. **Config load** (`config.load_config`) parses JSON, resolves `source`
    paths relative to the config file's directory, validates `fit_mode` /
    `flip_mode`, and expands `epilogue` shorthand into `single` + an
-   absolute path under `assets/epilogue_flaps/`.
+   absolute path under `assets/flap_glyphs/<font>/`.
 2. **Dimension resolution** (`dimensions.AllDimensions.resolve`) tries
    OpenSCAD first (via `scad_parser.run_openscad`, which spawns OpenSCAD
    with `PVV_splitflap_mods.scad`, parses `FLAP_PRINTER: key=value` echoes,
@@ -466,11 +473,28 @@ Thin wrapper around `resvg_py.svg_to_bytes`:
 - `resvg_py` is imported lazily so installs that never use SVG inputs do
   not pay the import cost.
 
-### Epilogue generator (`generate_epilogue_flap_svgs.py`)
+### Glyph generator (`generate_epilogue_flap_svgs.py`)
 
-This script regenerates `assets/epilogue_flaps/flap_NN.svg`.  It is **not**
+This script renders `assets/flap_glyphs/<font>/flap_NN.svg` for any font
+preset defined in `3d/flap_fonts.scad`. It is **not**
 run by the flap_printer at runtime — the SVGs are committed to the repo.
 Run it manually after editing the SCAD wrapper or switching fonts.
+
+Basic usage:
+
+```bash
+# Epilogue (already committed; re-run to change fill color)
+python pvv_tools/generate_epilogue_flap_svgs.py --font Epilogue
+
+# Any other preset from 3d/flap_fonts.scad
+python pvv_tools/generate_epilogue_flap_svgs.py --font Roboto
+python pvv_tools/generate_epilogue_flap_svgs.py --font Bangers --fill-color "#000000"
+```
+
+Output is written to `pvv_tools/assets/flap_glyphs/<font>/`. After
+reviewing the SVGs (and optionally hand-editing fill colors or adjusting
+geometry), commit the directory to make it available to job configs via
+`{"type": "glyph", "font": "<font>", ...}`.
 
 For each of the 52 characters it:
 
