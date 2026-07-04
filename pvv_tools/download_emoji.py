@@ -110,8 +110,12 @@ def main() -> int:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument('char',
+    parser.add_argument('char', nargs='?', default=None,
                         help='Emoji character or sequence to download (e.g. "👋🏽")')
+    parser.add_argument('--codepoints', default=None,
+                        help='Hex codepoint sequence instead of a literal character '
+                             '(e.g. --codepoints 1f44b-1f3fd). '
+                             'Useful in batch files where emoji characters may be garbled.')
     parser.add_argument('--name', default=None,
                         help='Override the output filename stem '
                              '(default: CLDR short name, e.g. waving-hand-medium-skin-tone)')
@@ -119,11 +123,24 @@ def main() -> int:
                         help='Output directory (default: pvv_tools/assets/emoji/)')
     args = parser.parse_args()
 
+    if args.codepoints:
+        # Build char from hex codepoint string, e.g. "1f44b-1f3fd" → "👋🏽"
+        try:
+            char = ''.join(chr(int(cp, 16)) for cp in args.codepoints.split('-'))
+        except ValueError as e:
+            logger.error("Invalid --codepoints value %r: %s", args.codepoints, e)
+            return 1
+    elif args.char:
+        char = args.char
+    else:
+        parser.error("Provide an emoji character or use --codepoints HEX")
+        return 1
+
     output_dir = args.output_dir or _EMOJI_ASSETS_DIR
-    stem = resolve_stem(args.char, args.name)
+    stem = resolve_stem(char, args.name)
 
     try:
-        dest = download(args.char, stem=stem, output_dir=output_dir)
+        dest = download(char, stem=stem, output_dir=output_dir)
     except RuntimeError as e:
         logger.error("%s", e)
         return 1
@@ -132,7 +149,7 @@ def main() -> int:
     print(f'\nJob JSON (by name — explicit, edit-safe):')
     print(f'  {{"type": "emoji", "name": "{stem}"}}')
     print(f'\nJob JSON (by char — auto-resolves name at load time):')
-    print(f'  {{"type": "emoji", "char": "{args.char}"}}')
+    print(f'  {{"type": "emoji", "char": "{char}"}}')
     print(f'\nHand-edit the SVG before committing:')
     print(f'  {dest}')
     return 0

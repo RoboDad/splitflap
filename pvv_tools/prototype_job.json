@@ -36,7 +36,7 @@
     {"slot":  0, "label": "PVV42", "type": "epilogue", "char": "-"},
     {"slot":  1, "label": "PVV43", "type": "epilogue", "char": "$"},
     {"slot":  2, "label": "PVV44", "type": "single", "source": "test_images/placeholders/WoodGathering.PNG"},
-    {"slot":  3, "label": "PVV45", "type": "single", "source": "test_images/placeholders/EP45.svg", "enabled": false},
+    {"slot":  3, "label": "PVV45", "type": "emoji", "name": "heart", "enabled": true},
     {"slot":  4, "label": "PVV46", "type": "single", "source": "test_images/placeholders/EP46.svg"},
     {"slot":  5, "label": "PVV47", "type": "single", "source": "test_images/placeholders/EP47.svg"},
     {"slot":  6, "label": "PVV48", "type": "single", "source": "test_images/placeholders/EP48.svg"},
