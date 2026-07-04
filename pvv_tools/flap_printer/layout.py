@@ -16,7 +16,7 @@ from .dimensions import FlapDimensions, JigDimensions, PrintableAreaDimensions, 
 @dataclass
 class FlapSide:
     """One printable side of one flap."""
-    image: Image.Image          # RGBA, sized to flap_width × flap_height in pixels
+    image: Image.Image          # RGBA; flap_width × flap_height, or slightly larger when bleed is baked in
     label: str                  # e.g. "EP42"
     slot_index: int             # 0-based index in the custom flap sequence
     side: str                   # "front" or "back"
@@ -74,7 +74,7 @@ def generate_batch_image(
     printable: PrintableAreaDimensions,
     dpi: float,
     orientation: str = "landscape",
-    bleed_mm: float = 0.0,
+    spool_at_bottom: bool = True,
 ) -> Image.Image:
     """Arrange up to jig.flaps_per_batch flap images on a printable-area-sized canvas.
 
@@ -82,11 +82,14 @@ def generate_batch_image(
     insert is positioned at (insert_offset_x, insert_offset_y) within that
     area, and the flap grid is positioned within the insert using margins.
 
-    When *bleed_mm* > 0, each flap image is upscaled by 2×bleed in each
-    dimension and pasted centered on its pocket position (offset by −bleed).
-    This fills the bleed zone with real image content so that sub-mm jig
-    misalignment doesn't expose bare flap stock.  The ink-save mask (applied
-    later) clips to exactly pocket + bleed.
+    Images in *flap_sides* may extend beyond the pocket boundary on flush edges
+    (bleed zone encoded in the image size).  The paste position is offset so that
+    the physical pocket area aligns with its grid coordinates.
+
+    *spool_at_bottom* — True for front batches (display/outer edge at top, spool
+    at bottom); False for back batches (spool at top, display edge at bottom).
+    For front batches the vertical bleed extends upward above the pocket; for
+    back batches it extends downward.
 
     If orientation is "landscape", the final image is rotated 90° CCW.
 
@@ -103,15 +106,10 @@ def generate_batch_image(
 
     flap_w_px = mm_to_px(flap.width, dpi)
     flap_h_px = mm_to_px(flap.height, dpi)
-    bleed_px = mm_to_px(bleed_mm, dpi) if bleed_mm > 0 else 0
     margin_x_px = mm_to_px(jig.margin_x, dpi)
     margin_y_px = mm_to_px(jig.margin_y, dpi)
     space_x_px = mm_to_px(flap.width + jig.gap_x, dpi)
     space_y_px = mm_to_px(flap.height + jig.gap_y, dpi)
-
-    # Target size: pocket + 2×bleed on each axis
-    target_w = flap_w_px + 2 * bleed_px
-    target_h = flap_h_px + 2 * bleed_px
 
     for i, fs in enumerate(flap_sides[:jig.flaps_per_batch]):
         col = i % jig.num_x
@@ -120,10 +118,20 @@ def generate_batch_image(
         pocket_x = insert_x_px + margin_x_px + col * space_x_px
         pocket_y = insert_y_px + margin_y_px + row * space_y_px
 
-        # Resize to pocket + bleed, paste offset by −bleed so image is
-        # centred on the pocket
-        resized = fs.image.resize((target_w, target_h), Image.LANCZOS)
-        canvas.paste(resized, (pocket_x - bleed_px, pocket_y - bleed_px), resized)
+        img = fs.image
+        # Bleed amounts are encoded in the image dimensions vs the pocket size
+        bleed_x = max(0, (img.width - flap_w_px) // 2)
+        bleed_y = max(0, img.height - flap_h_px)
+
+        paste_x = pocket_x - bleed_x
+        if spool_at_bottom:
+            # Front: outer display edge at top — vertical bleed extends above pocket
+            paste_y = pocket_y - bleed_y
+        else:
+            # Back: outer display edge at bottom — vertical bleed extends below pocket
+            paste_y = pocket_y
+
+        canvas.paste(img, (paste_x, paste_y), img)
 
     if orientation == "landscape":
         canvas = canvas.transpose(Image.ROTATE_90)

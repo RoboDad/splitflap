@@ -13,11 +13,16 @@ def slice_display_image(
     image: Image.Image,
     flap: FlapDimensions,
     dpi: float,
+    bleed_y: int = 0,
 ) -> tuple[Image.Image, Image.Image]:
     """Split a full-character display image into top and bottom halves.
 
     The input image represents one full character as a viewer would see it:
     top-half (43mm) + gap (2.4mm) + bottom-half (43mm) = 88.4mm total.
+    When *bleed_y* > 0, the image is taller by 2×bleed_y (bleed_y extra rows
+    at the outer top and bleed_y extra rows at the outer bottom).  The
+    returned halves preserve those outer bleed rows so the physical pocket
+    area is centred within each half.
 
     Returns (top_half, bottom_half) as RGBA images.
     The gap strip in the centre is discarded.
@@ -26,13 +31,13 @@ def slice_display_image(
 
     top_px = mm_to_px(flap.height, dpi)
     gap_px = mm_to_px(flap.gap, dpi)
-    # bottom starts after top + gap
-    bottom_start = top_px + gap_px
-
     w = image.width
 
-    top_half = image.crop((0, 0, w, top_px))
-    bottom_half = image.crop((0, bottom_start, w, bottom_start + top_px))
+    # Top half: rows 0..(top_px + bleed_y) — outer top bleed preserved
+    top_half = image.crop((0, 0, w, top_px + bleed_y))
+    # Bottom half: rows after the gap to end — outer bottom bleed preserved
+    bottom_start = top_px + bleed_y + gap_px
+    bottom_half = image.crop((0, bottom_start, w, bottom_start + top_px + bleed_y))
 
     return top_half, bottom_half
 
@@ -101,13 +106,51 @@ def apply_transforms(
     return image
 
 
+def _flush_edges(
+    image_w: int,
+    image_h: int,
+    target_w: int,
+    target_h: int,
+    fit_mode: str,
+) -> tuple[bool, bool]:
+    """Return (flush_x, flush_y): whether the fitted image reaches the target edges.
+
+    flush_x — image fills the full target width (no left/right bars).
+    flush_y — image fills the full target height (no top/bottom bars).
+    Used to determine which axes need bleed-zone expansion.
+    """
+    if fit_mode == 'stretch':
+        return True, True
+    if fit_mode == 'contain':
+        return False, False
+    if fit_mode == 'fill':
+        return True, True
+    if fit_mode == 'fit':
+        if image_w <= 0 or image_h <= 0 or target_w <= 0 or target_h <= 0:
+            return False, False
+        img_ar = image_w / image_h
+        tgt_ar = target_w / target_h
+        # width-constrained: image wider than target ratio → fills x, bars in y
+        if img_ar >= tgt_ar:
+            return True, False
+        else:
+            return False, True
+    return False, False
+
+
 def fit_to_target(
     image: Image.Image,
     target_w: int,
     target_h: int,
     mode: str = 'fit',
+    bleed_px: int = 0,
 ) -> Image.Image:
     """Resize image to target dimensions using the specified fit mode.
+
+    When *bleed_px* > 0, the target rectangle is expanded outward on axes
+    where the image fills to the edge (flush edges), so the returned image
+    extends into the bleed zone on those sides.  The physical pocket area
+    occupies the centre of the returned image on bleed axes.
 
     Modes:
       fit     — uniform scale to fit within target; transparent letterbox, centered.
@@ -117,36 +160,43 @@ def fit_to_target(
     """
     image = image.convert('RGBA')
 
+    # Expand target on flush axes so image content extends into the bleed zone
+    flush_x, flush_y = _flush_edges(image.width, image.height, target_w, target_h, mode)
+    bx = bleed_px if flush_x else 0
+    by = bleed_px if flush_y else 0
+    exp_w = target_w + 2 * bx
+    exp_h = target_h + 2 * by
+
     if mode == 'stretch':
-        return image.resize((target_w, target_h), Image.LANCZOS)
+        return image.resize((exp_w, exp_h), Image.LANCZOS)
 
     if mode == 'fit':
-        # Scale uniformly so the image fits entirely within the target
-        ratio = min(target_w / image.width, target_h / image.height)
+        # Scale uniformly so the image fits entirely within the expanded target
+        ratio = min(exp_w / image.width, exp_h / image.height)
         new_w = max(1, round(image.width * ratio))
         new_h = max(1, round(image.height * ratio))
         scaled = image.resize((new_w, new_h), Image.LANCZOS)
-        canvas = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
-        paste_x = (target_w - new_w) // 2
-        paste_y = (target_h - new_h) // 2
+        canvas = Image.new('RGBA', (exp_w, exp_h), (0, 0, 0, 0))
+        paste_x = (exp_w - new_w) // 2
+        paste_y = (exp_h - new_h) // 2
         canvas.paste(scaled, (paste_x, paste_y), scaled)
         return canvas
 
     if mode == 'fill':
-        # Scale uniformly so the image covers the entire target, then center-crop
-        ratio = max(target_w / image.width, target_h / image.height)
+        # Scale uniformly so the image covers the entire expanded target, then center-crop
+        ratio = max(exp_w / image.width, exp_h / image.height)
         new_w = max(1, round(image.width * ratio))
         new_h = max(1, round(image.height * ratio))
         scaled = image.resize((new_w, new_h), Image.LANCZOS)
-        crop_x = (new_w - target_w) // 2
-        crop_y = (new_h - target_h) // 2
-        return scaled.crop((crop_x, crop_y, crop_x + target_w, crop_y + target_h))
+        crop_x = (new_w - exp_w) // 2
+        crop_y = (new_h - exp_h) // 2
+        return scaled.crop((crop_x, crop_y, crop_x + exp_w, crop_y + exp_h))
 
     if mode == 'contain':
-        # No scaling — center the image on the target canvas as-is
-        canvas = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
-        paste_x = (target_w - image.width) // 2
-        paste_y = (target_h - image.height) // 2
+        # No scaling — center the image on the expanded target canvas as-is
+        canvas = Image.new('RGBA', (exp_w, exp_h), (0, 0, 0, 0))
+        paste_x = (exp_w - image.width) // 2
+        paste_y = (exp_h - image.height) // 2
         canvas.paste(image, (paste_x, paste_y), image)
         return canvas
 
@@ -161,6 +211,7 @@ def fit_with_notch_mode(
     notch_left: str,
     notch_right: str,
     notch_inset_px: int,
+    bleed_px: int = 0,
 ) -> Image.Image:
     """Apply fit_mode with independent per-side notch-clearance modifiers.
 
@@ -176,29 +227,42 @@ def fit_with_notch_mode(
     When both sides are 'none', equivalent to fit_to_target(target_w, target_h).
     When sides have different modes, 'squeeze' takes precedence for the
     image-fitting step (fit-to-content-width vs fit-then-squish).
+
+    When *bleed_px* > 0:
+    - No horizontal bleed is applied on notch sides (the notch zone is
+      physically cut away, making side-edge bleed unnecessary).
+    - Vertical bleed is applied on top and bottom when the image fills
+      those edges, using the effective content-area dimensions for the
+      flush-edge determination.
     """
     left_inset = notch_inset_px if notch_left != 'none' else 0
     right_inset = notch_inset_px if notch_right != 'none' else 0
 
     if (left_inset == 0 and right_inset == 0) or notch_inset_px <= 0:
-        return fit_to_target(image, target_w, target_h, fit_mode)
+        return fit_to_target(image, target_w, target_h, fit_mode, bleed_px)
 
     content_w = max(1, target_w - left_inset - right_inset)
     paste_x = left_inset
 
-    # Effective mode: 'squeeze' wins if either active side requests it
     active_modes = {m for m in (notch_left, notch_right) if m != 'none'}
     effective = 'squeeze' if 'squeeze' in active_modes else 'inset'
 
+    # With any notch: suppress horizontal bleed (notch zone is transparent/cut away).
+    # Vertical bleed follows flush-edge determination against the content-area dimensions.
+    _, flush_y = _flush_edges(image.width, image.height, content_w, target_h, fit_mode)
+    by = bleed_px if flush_y else 0
+    exp_h = target_h + 2 * by
+
     if effective == 'inset':
-        fitted = fit_to_target(image, content_w, target_h, fit_mode)
-        canvas = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
+        # Fit within the content area at the expanded height (bleed_px=0 — pre-expanded)
+        fitted = fit_to_target(image, content_w, exp_h, fit_mode)
+        canvas = Image.new('RGBA', (target_w, exp_h), (0, 0, 0, 0))
         canvas.paste(fitted, (paste_x, 0), fitted)
         return canvas
 
-    # squeeze
-    fitted = fit_to_target(image, target_w, target_h, fit_mode)
-    squeezed = fitted.resize((content_w, target_h), Image.LANCZOS)
-    canvas = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
+    # squeeze: fit to full width first, then squeeze to content width
+    fitted = fit_to_target(image, target_w, exp_h, fit_mode)
+    squeezed = fitted.resize((content_w, exp_h), Image.LANCZOS)
+    canvas = Image.new('RGBA', (target_w, exp_h), (0, 0, 0, 0))
     canvas.paste(squeezed, (paste_x, 0), squeezed)
     return canvas

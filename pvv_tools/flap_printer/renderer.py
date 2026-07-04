@@ -54,8 +54,13 @@ def _render_custom_flap_images(
     module_index: int,
     dims: AllDimensions,
     dpi: float,
+    bleed_px: int = 0,
 ) -> Optional[tuple[Image.Image, Image.Image]]:
     """Render one CustomFlap to (top_half, bottom_half) at the given DPI.
+
+    When *bleed_px* > 0, images are expanded into the bleed zone on flush
+    edges so the batch layout can paste them offset by the bleed amount.
+    The physical pocket area is centred within the returned images.
 
     Returns None if the flap does not apply to *module_index* (multi-module
     flaps whose range excludes the requested module).
@@ -79,8 +84,9 @@ def _render_custom_flap_images(
         fit = cf.fit_mode or config.global_transforms.fit_mode
         notch = cf.notch_mode or config.global_transforms.notch_mode
         notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
-        img = fit_with_notch_mode(img, target_w, target_h, fit, notch[0], notch[1], notch_inset_px)
-        return slice_display_image(img, dims.flap, dpi)
+        img = fit_with_notch_mode(img, target_w, target_h, fit, notch[0], notch[1], notch_inset_px, bleed_px)
+        bleed_y = max(0, (img.height - mm_to_px(dims.flap.display_height, dpi)) // 2)
+        return slice_display_image(img, dims.flap, dpi, bleed_y=bleed_y)
 
     if cf.type == "multi-module":
         if cf.module_range is None:
@@ -104,8 +110,9 @@ def _render_custom_flap_images(
         column = extract_module_column(img, module_index, cf.module_range, dims.display, dpi)
         flap_w_px = mm_to_px(dims.flap.width, dpi)
         flap_display_h = mm_to_px(dims.flap.display_height, dpi)
-        column = fit_with_notch_mode(column, flap_w_px, flap_display_h, fit, notch[0], notch[1], notch_inset_px)
-        return slice_display_image(column, dims.flap, dpi)
+        column = fit_with_notch_mode(column, flap_w_px, flap_display_h, fit, notch[0], notch[1], notch_inset_px, bleed_px)
+        bleed_y = max(0, (column.height - mm_to_px(dims.flap.display_height, dpi)) // 2)
+        return slice_display_image(column, dims.flap, dpi, bleed_y=bleed_y)
 
     return None  # unknown type
 
@@ -115,6 +122,7 @@ def _resolve_flaps_for_module(
     module_index: int,
     dims: AllDimensions,
     dpi: float,
+    bleed_px: int = 0,
 ) -> list[tuple[Image.Image, Image.Image, str]]:
     """Resolve and slice all custom flap images for a given module.
 
@@ -123,10 +131,33 @@ def _resolve_flaps_for_module(
     """
     results = []
     for cf in config.custom_flaps:
-        pair = _render_custom_flap_images(cf, config, module_index, dims, dpi)
+        pair = _render_custom_flap_images(cf, config, module_index, dims, dpi, bleed_px)
         if pair is not None:
             results.append((*pair, cf.label))
     return results
+
+
+def _crop_to_pocket(
+    img: Image.Image,
+    flap_w: int,
+    flap_h: int,
+    is_top: bool,
+) -> Image.Image:
+    """Crop a (possibly bleed-expanded) half-flap image to the physical pocket area.
+
+    For top halves the outer bleed is at the top of the image; for bottom
+    halves it is at the bottom.  Returns img unchanged when there is no bleed.
+    """
+    bx = max(0, (img.width - flap_w) // 2)
+    by = max(0, img.height - flap_h)
+    if bx == 0 and by == 0:
+        return img
+    if is_top:
+        # Bleed at outer top → visible pocket area occupies the bottom flap_h rows
+        return img.crop((bx, by, bx + flap_w, img.height))
+    else:
+        # Bleed at outer bottom → visible pocket area occupies the top flap_h rows
+        return img.crop((bx, 0, bx + flap_w, flap_h))
 
 
 def _collect_preview_entries(
@@ -136,24 +167,36 @@ def _collect_preview_entries(
 ) -> list[tuple[Image.Image, Image.Image, str]]:
     """Collect (top_half, bottom_half, label) for every unique displayable slot.
 
+    Images are rendered with bleed and then cropped to the physical pocket
+    area, so the preview is WYSIWYG: it shows exactly the content that will
+    be visible on the physical flap after cutting.
+
     Single / glyph / emoji / blank flaps appear once.
     Multi-module flaps appear once per module in their range.
     Labels include both the flap label and the slot index (user preference).
     """
+    flap_w = mm_to_px(dims.flap.width, dpi)
+    flap_h = mm_to_px(dims.flap.height, dpi)
+    bleed_px = mm_to_px(config.output.bleed_mm, dpi)
+
     entries = []
     for cf in config.custom_flaps:
         if cf.type == "multi-module" and cf.module_range:
             start, end = cf.module_range
             for m in range(start, end + 1):
-                pair = _render_custom_flap_images(cf, config, m, dims, dpi)
+                pair = _render_custom_flap_images(cf, config, m, dims, dpi, bleed_px)
                 if pair is not None:
+                    top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True)
+                    bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False)
                     label = f"{cf.label} M{m} · #{cf.slot}"
-                    entries.append((*pair, label))
+                    entries.append((top, bottom, label))
         else:
-            pair = _render_custom_flap_images(cf, config, 0, dims, dpi)
+            pair = _render_custom_flap_images(cf, config, 0, dims, dpi, bleed_px)
             if pair is not None:
+                top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True)
+                bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False)
                 label = f"{cf.label} · #{cf.slot}"
-                entries.append((*pair, label))
+                entries.append((top, bottom, label))
     return entries
 
 
@@ -201,15 +244,16 @@ def render_job(
 
     modules = _get_modules_to_process(config, module_filter)
     generated: list[Path] = []
+    bleed_px = mm_to_px(config.output.bleed_mm, dpi)
 
     for mod_idx in modules:
         if mod_idx == -1:
             mod_label = "common"
             # For common/single flaps, process without module context
-            flap_data = _resolve_flaps_for_module(config, 0, dims, dpi)
+            flap_data = _resolve_flaps_for_module(config, 0, dims, dpi, bleed_px)
         else:
             mod_label = f"module_{mod_idx:02d}"
-            flap_data = _resolve_flaps_for_module(config, mod_idx, dims, dpi)
+            flap_data = _resolve_flaps_for_module(config, mod_idx, dims, dpi, bleed_px)
 
         if not flap_data:
             logger.info("No custom flaps for %s, skipping", mod_label)
@@ -235,16 +279,15 @@ def render_job(
             back_batch = backs[start:end]
 
             # Generate front image
-            bleed = config.output.bleed_mm
             front_img = generate_batch_image(front_batch, dims.flap, dims.jig, dims.printable, dpi, orient,
-                                             bleed_mm=bleed)
+                                             spool_at_bottom=True)
 
             # Reorder back-side flaps to their post-jig-flip grid positions.
             # This reverses the flap order (correct for physical jig flip)
             # without mirroring individual flap content.
             reordered_back = reorder_for_jig_flip(back_batch, dims.jig, flip, orient)
             back_img = generate_batch_image(reordered_back, dims.flap, dims.jig, dims.printable, dpi, orient,
-                                            bleed_mm=bleed)
+                                            spool_at_bottom=False)
 
             # Apply ink-saving mask
             if mask_on:
