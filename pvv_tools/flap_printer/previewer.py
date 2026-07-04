@@ -4,8 +4,8 @@ Produces a grid image showing all rendered flap slots as they would appear
 on the physical splitflap display: two flap halves (top + bottom) separated
 by the real gap, with the physical flap shape (rounded outer corners +
 spool-pin notch cutouts on the inner sides) rendered in the configured
-flap colour.  Artwork is alpha-composited on top so transparent regions
-show the flap colour.
+flap colour.  Artwork is clipped to the flap outline and alpha-composited
+on top so transparent regions show the flap colour.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import logging
 import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from .config import JobConfig
 from .dimensions import AllDimensions, mm_to_px
@@ -72,6 +72,40 @@ def _draw_flap_half(
         draw.rectangle((x, y, x + notch_d - 1, y + notch_h - 1), fill=bg_color)
         # Right notch at top edge
         draw.rectangle((x + w - notch_d, y, x + w - 1, y + notch_h - 1), fill=bg_color)
+
+
+def _make_flap_mask(
+    w: int,
+    h: int,
+    corner_r: int,
+    notch_h: int,
+    notch_d: int,
+    notch_at_bottom: bool,
+) -> Image.Image:
+    """Return a grayscale mask (L mode) for one flap half.
+
+    White (255) = inside the flap outline; black (0) = outside.
+    Used to clip artwork so nothing bleeds beyond the physical flap shape.
+    """
+    mask = Image.new('L', (w, h), 0)
+    draw = ImageDraw.Draw(mask)
+
+    if notch_at_bottom:
+        corners = (True, True, False, False)
+    else:
+        corners = (False, False, True, True)
+
+    draw.rounded_rectangle((0, 0, w - 1, h - 1), radius=corner_r, fill=255, corners=corners)
+
+    # Cut out notch areas
+    if notch_at_bottom:
+        draw.rectangle((0, h - notch_h, notch_d - 1, h - 1), fill=0)
+        draw.rectangle((w - notch_d, h - notch_h, w - 1, h - 1), fill=0)
+    else:
+        draw.rectangle((0, 0, notch_d - 1, notch_h - 1), fill=0)
+        draw.rectangle((w - notch_d, 0, w - 1, notch_h - 1), fill=0)
+
+    return mask
 
 
 # ---------------------------------------------------------------------------
@@ -132,9 +166,18 @@ def _render_preview_cell(
                     corner_r, notch_h, notch_d, flap_rgba, bg_rgba,
                     notch_at_bottom=False)
 
-    # Artwork composited over the flap shapes
+    # Artwork composited over the flap shapes, clipped to flap outline
+    mask_top = _make_flap_mask(flap_w, flap_h, corner_r, notch_h, notch_d, notch_at_bottom=True)
+    mask_bot = _make_flap_mask(flap_w, flap_h, corner_r, notch_h, notch_d, notch_at_bottom=False)
+
     top_r = top_half.convert('RGBA').resize((flap_w, flap_h), Image.LANCZOS)
     bottom_r = bottom_half.convert('RGBA').resize((flap_w, flap_h), Image.LANCZOS)
+
+    # Intersect artwork alpha with the flap mask so pixels outside the outline
+    # are fully transparent before compositing onto the cell.
+    top_r.putalpha(ImageChops.multiply(top_r.getchannel('A'), mask_top))
+    bottom_r.putalpha(ImageChops.multiply(bottom_r.getchannel('A'), mask_bot))
+
     cell.alpha_composite(top_r, dest=(0, 0))
     cell.alpha_composite(bottom_r, dest=(0, flap_h + gap_h))
 

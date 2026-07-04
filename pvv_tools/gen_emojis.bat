@@ -9,7 +9,7 @@
 ::   python pvv_tools\download_emoji.py --codepoints 2764-fe0f --name heart
 :: Codepoints are shown on each emoji's emojipedia.org page.
 
-cd /d "%~dp0\.."
+pushd "%~dp0\.."
 call .venv\Scripts\activate.bat
 chcp 65001 > nul
 
@@ -25,3 +25,5 @@ python pvv_tools\download_emoji.py "😘" --name kiss
 python pvv_tools\download_emoji.py "😊" --name smile
 python pvv_tools\download_emoji.py "😍" --name heart_eyes
 python pvv_tools\download_emoji.py "🥰" --name smiling_face_with_hearts
+
+popd
