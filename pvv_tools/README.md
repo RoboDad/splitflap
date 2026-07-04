@@ -225,6 +225,45 @@ An array of objects, one per custom flap. Required fields: `slot`, `source`.
 
 ---
 
+## Image Offset (`offset_mm`)
+
+The per-flap `offset_mm: [dx_mm, dy_mm]` field shifts the fitted image content
+within the pocket after all fit, notch, and bleed transformations have been
+applied, but before the ink-save mask clips the result.
+
+```json
+{"slot": 3, "type": "emoji", "name": "heart", "offset_mm": [0, -2.5]}
+```
+
+**Coordinate system** (matches the print output image):
+- **Positive X** → shifts content **right**
+- **Negative X** → shifts content **left**
+- **Positive Y** → shifts content **down**
+- **Negative Y** → shifts content **up**
+
+The offset is applied to the full display image (both halves together) before
+the top/bottom split. This means a vertical offset moves the character up or
+down relative to the gap line — e.g. `[0, -3]` raises the whole character 3 mm,
+so more of the top half's area has content and the bottom half loses content
+at its lower edge.
+
+Content pushed outside the `pocket + bleed_mm` boundary is clipped by the
+ink-save mask, same as bleed overflow. The preview image shows the offset
+applied, so what you see in `preview.png` matches the final printed flap.
+
+**Contrast with `calibration_offset_mm`** (in the `output` section):
+that field shifts the *entire output canvas* — flap art, ink-save mask, labels,
+and registration marks all move together — to compensate for a systematic
+printer-vs-jig registration error. `offset_mm` moves only the artwork for one
+specific flap entry, leaving all other flaps and the mask shape unchanged.
+
+**When to use it:** fine-tuning image placement within a pocket when the
+source artwork has uneven whitespace, or when an emoji's visual centre of mass
+reads as off-centre after fitting. Prefer adjusting source artwork instead when
+doing so is straightforward.
+
+---
+
 ## Fit Modes
 
 Controls how each input image is mapped to the target flap area
