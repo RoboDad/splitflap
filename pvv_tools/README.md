@@ -200,7 +200,7 @@ Applied to all input images unless overridden per-flap.
 | `scale` | [float, float] | `[1.0, 1.0]` | Scale multiplier `[sx, sy]` applied after crop |
 | `crop_percent` | [L, T, R, B] | `null` | Percentage to trim from each edge: `[left%, top%, right%, bottom%]` |
 | `fit_mode` | string | `"fit"` | How images are fit to the target flap area (see [Fit Modes](#fit-modes)) |
-| `notch_mode` | string | `"none"` | Notch-clearance modifier applied after fitting (see [Notch Modes](#notch-modes)) |
+| `notch_mode` | string or `[left, right]` | `"none"` | Notch-clearance modifier (see [Notch Modes](#notch-modes)) |
 
 ### `custom_flaps` — Flap definitions
 
@@ -218,7 +218,7 @@ An array of objects, one per custom flap. Required fields: `slot`, `source`.
 | `scale` | [float, float] | `null` | Per-image scale override `[sx, sy]`; `null` = use global |
 | `crop` | [L, T, R, B] | `null` | Per-image crop override `[left%, top%, right%, bottom%]`; `null` = use global |
 | `fit_mode` | string | `null` | Per-image fit mode override; `null` = use global default |
-| `notch_mode` | string | `null` | Per-image notch-clearance override; `null` = use global default |
+| `notch_mode` | string or `[left, right]` | `null` | Per-image notch-clearance override; `null` = use global default |
 | `enabled` | bool | `true` | When `false`, output for this flap is fully transparent; the slot position is preserved in the layout. Useful for temporarily disabling a slot without removing it from the config. |
 
 ---
@@ -254,15 +254,53 @@ Set globally in `global_transforms.notch_mode` and/or per-image via `notch_mode`
 on individual `custom_flaps` entries. The effective safe width is
 `flap_width - 2 × notch_depth` (default: 54 - 2×3.2 = **47.6 mm**).
 
+### Symmetric (string) form
+
+A plain string applies the same mode to both sides:
+
 | Mode | Behavior |
 |------|-----------|
-| **`none`** (default) | No adjustment. Image fills the full 54 mm canvas. Use for text/character glyphs that already stay clear of the notch zone. |
-| **`inset`** | Image is fit into the **safe-width** canvas (47.6 mm), then centered on the full 54 mm canvas with transparent bands at the sides. Best for emoji/icons where you want the full image visible. |
-| **`squeeze`** | Image is fit to the full 54 mm canvas as normal, then **non-uniformly scaled** to the safe width. Height is unchanged; the image is slightly narrower. Best when you want edge-to-edge coverage and a small aspect-ratio change is acceptable. |
+| **`"none"`** (default) | No adjustment. Image fills the full 54 mm canvas. Use for text/character glyphs that already stay clear of the notch zone. |
+| **`"inset"`** | Image is fit into the **safe-width** canvas (47.6 mm), then centered on the full 54 mm canvas with transparent bands at the sides. Best for emoji/icons where you want the full image visible. |
+| **`"squeeze"`** | Image is fit to the full 54 mm canvas as normal, then **non-uniformly scaled** to the safe width. Height is unchanged; the image is slightly narrower. Best when you want edge-to-edge coverage and a small aspect-ratio change is acceptable. |
+
+### Per-side (list) form
+
+Pass a two-element list `[left_mode, right_mode]` to control each notch independently.
+Each element is one of `"none"`, `"inset"`, or `"squeeze"`.
+
+```json
+// Both sides — equivalent to the string form above:
+{"notch_mode": "inset"}
+{"notch_mode": ["inset", "inset"]}
+
+// Left side only (right notch is unobstructed):
+{"notch_mode": ["inset", "none"]}
+
+// Right side only:
+{"notch_mode": ["none", "squeeze"]}
+
+// Different depths on each side — squeeze wins for the fitting step:
+{"notch_mode": ["inset", "squeeze"]}
+```
+
+When sides have different modes, **`"squeeze"` takes precedence** for the
+image-fitting step: the image is always fit to full width first and then
+scaled to the content area, regardless of which side requested it.
+
+The `left_inset` and `right_inset` gaps are computed independently:
+
+| JSON value | Content width | `paste_x` |
+|---|---|---|
+| `"inset"` / `["inset","inset"]` | 47.6 mm | 3.2 mm (centered) |
+| `["inset", "none"]` | 50.8 mm | 3.2 mm (left gap only) |
+| `["none", "inset"]` | 50.8 mm | 0 mm (right gap only) |
+| `["squeeze","none"]` | 50.8 mm | 3.2 mm |
 
 **Choosing a mode:** Use `"inset"` for icons and emoji — content is untouched
 but the sides will not be visible past the notch. Use `"squeeze"` when the
 slight horizontal compression is preferable to visible letterbox bands.
+Use the list form when an image only approaches one notch.
 
 ---
 

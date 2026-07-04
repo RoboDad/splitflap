@@ -126,8 +126,8 @@ VALID_NOTCH_MODES = ('none', 'inset', 'squeeze')
 class GlobalTransforms:
     scale: tuple[float, float] = (1.0, 1.0)
     crop_percent: Optional[tuple[float, float, float, float]] = None  # (left%, top%, right%, bottom%)
-    fit_mode: str = 'fit'    # 'fit' | 'fill' | 'stretch' | 'contain'
-    notch_mode: str = 'none' # 'none' | 'inset' | 'squeeze'
+    fit_mode: str = 'fit'                    # 'fit' | 'fill' | 'stretch' | 'contain'
+    notch_mode: tuple[str, str] = ('none', 'none')  # (left, right)
 
 
 @dataclass
@@ -140,7 +140,7 @@ class CustomFlap:
     scale: Optional[tuple[float, float]] = None
     crop: Optional[tuple[float, float, float, float]] = None  # (left%, top%, right%, bottom%)
     fit_mode: Optional[str] = None    # per-image override; None = use global default
-    notch_mode: Optional[str] = None  # 'none' | 'inset' | 'squeeze'; None = use global default
+    notch_mode: Optional[tuple[str, str]] = None  # (left, right); None = use global default
     enabled: bool = True  # False → output is 100% transparent; slot position preserved
 
     # Resolved at load time
@@ -239,6 +239,28 @@ def _parse_rgb(raw, field_name: str) -> tuple[int, int, int]:
     if len(raw) != 3:
         raise ValueError(f"{field_name} must be [R, G, B], got: {raw!r}")
     return tuple(int(c) for c in raw)
+
+
+def _parse_notch_mode(raw, field_name: str) -> tuple[str, str]:
+    """Parse a notch_mode value: string (symmetric) or [left, right] list.
+
+    A plain string like "inset" is expanded to ("inset", "inset").
+    A two-element list like ["inset", "none"] becomes ("inset", "none").
+    """
+    if isinstance(raw, str):
+        if raw not in VALID_NOTCH_MODES:
+            raise ValueError(f"{field_name}: invalid notch_mode {raw!r} "
+                             f"(expected one of {VALID_NOTCH_MODES})")
+        return (raw, raw)
+    if isinstance(raw, (list, tuple)) and len(raw) == 2:
+        left, right = str(raw[0]), str(raw[1])
+        for side, val in (('left', left), ('right', right)):
+            if val not in VALID_NOTCH_MODES:
+                raise ValueError(f"{field_name}: invalid notch_mode {side}={val!r} "
+                                 f"(expected one of {VALID_NOTCH_MODES})")
+        return (left, right)
+    raise ValueError(
+        f"{field_name}: notch_mode must be a string or [left, right] list, got: {raw!r}")
 
 
 def _load_preview(raw: dict) -> PreviewConfig:
@@ -342,12 +364,10 @@ def load_config(path: str | Path) -> JobConfig:
         scale=tuple(scale_raw) if scale_raw else (1.0, 1.0),
         crop_percent=tuple(crop_raw) if crop_raw else None,
         fit_mode=_get(gt, 'fit_mode', 'fit'),
-        notch_mode=_get(gt, 'notch_mode', 'none'),
+        notch_mode=_parse_notch_mode(_get(gt, 'notch_mode', 'none'), 'global_transforms.notch_mode'),
     )
     if global_transforms.fit_mode not in VALID_FIT_MODES:
         raise ValueError(f"Invalid global fit_mode: {global_transforms.fit_mode!r} (expected one of {VALID_FIT_MODES})")
-    if global_transforms.notch_mode not in VALID_NOTCH_MODES:
-        raise ValueError(f"Invalid global notch_mode: {global_transforms.notch_mode!r} (expected one of {VALID_NOTCH_MODES})")
 
     # Custom flaps
     custom_flaps = []
@@ -457,15 +477,14 @@ def load_config(path: str | Path) -> JobConfig:
             scale=tuple(scale) if scale else None,
             crop=tuple(crop) if crop else None,
             fit_mode=cf.get('fit_mode', None),
-            notch_mode=cf.get('notch_mode', None),
+            notch_mode=_parse_notch_mode(cf['notch_mode'], f"custom_flaps[{i}].notch_mode") if cf.get('notch_mode') is not None else None,
             enabled=bool(cf.get('enabled', True)),
             source_path=source_path,
         )
 
         if flap.fit_mode is not None and flap.fit_mode not in VALID_FIT_MODES:
             raise ValueError(f"custom_flaps[{i}]: invalid fit_mode {flap.fit_mode!r} (expected one of {VALID_FIT_MODES})")
-        if flap.notch_mode is not None and flap.notch_mode not in VALID_NOTCH_MODES:
-            raise ValueError(f"custom_flaps[{i}]: invalid notch_mode {flap.notch_mode!r} (expected one of {VALID_NOTCH_MODES})")
+        # notch_mode is already validated by _parse_notch_mode at load time
 
         if flap.type == 'multi-module' and flap.module_range is None:
             raise ValueError(f"custom_flaps[{i}]: 'module_range' is required for multi-module type")

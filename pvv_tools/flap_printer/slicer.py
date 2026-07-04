@@ -158,38 +158,47 @@ def fit_with_notch_mode(
     target_w: int,
     target_h: int,
     fit_mode: str,
-    notch_mode: str,
+    notch_left: str,
+    notch_right: str,
     notch_inset_px: int,
 ) -> Image.Image:
-    """Apply fit_mode with an optional notch-clearance modifier.
+    """Apply fit_mode with independent per-side notch-clearance modifiers.
 
-    notch_mode values:
-      'none'    Standard fit_to_target(target_w, target_h) — no notch handling.
-      'inset'   Fit within (target_w - 2*notch_inset_px) x target_h using
-                fit_mode, then center the result on the full target_w canvas.
-                Aspect ratio is preserved; the image may be smaller overall.
-      'squeeze' Fit to the full target_w x target_h first (standard fit_mode),
-                then non-uniformly scale the result to notch-safe width while
-                keeping height fixed. Aspect ratio changes; height is locked.
+    notch_left / notch_right — each independently 'none' | 'inset' | 'squeeze':
+      'none'    No adjustment on that side.
+      'inset'   Fit within the safe content area (target_w minus active side
+                insets); paste with the per-side gaps preserved as transparent.
+                Aspect ratio is maintained; image may be smaller overall.
+      'squeeze' Fit to the full target_w first, then non-uniformly scale to
+                the safe content width; paste with per-side gaps transparent.
+                Height is preserved; horizontal aspect ratio changes.
+
+    When both sides are 'none', equivalent to fit_to_target(target_w, target_h).
+    When sides have different modes, 'squeeze' takes precedence for the
+    image-fitting step (fit-to-content-width vs fit-then-squish).
     """
-    if notch_mode == 'none' or notch_inset_px <= 0:
+    left_inset = notch_inset_px if notch_left != 'none' else 0
+    right_inset = notch_inset_px if notch_right != 'none' else 0
+
+    if (left_inset == 0 and right_inset == 0) or notch_inset_px <= 0:
         return fit_to_target(image, target_w, target_h, fit_mode)
 
-    inset_w = max(1, target_w - 2 * notch_inset_px)
+    content_w = max(1, target_w - left_inset - right_inset)
+    paste_x = left_inset
 
-    if notch_mode == 'inset':
-        fitted = fit_to_target(image, inset_w, target_h, fit_mode)
+    # Effective mode: 'squeeze' wins if either active side requests it
+    active_modes = {m for m in (notch_left, notch_right) if m != 'none'}
+    effective = 'squeeze' if 'squeeze' in active_modes else 'inset'
+
+    if effective == 'inset':
+        fitted = fit_to_target(image, content_w, target_h, fit_mode)
         canvas = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
-        paste_x = (target_w - inset_w) // 2
         canvas.paste(fitted, (paste_x, 0), fitted)
         return canvas
 
-    if notch_mode == 'squeeze':
-        fitted = fit_to_target(image, target_w, target_h, fit_mode)
-        squeezed = fitted.resize((inset_w, target_h), Image.LANCZOS)
-        canvas = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
-        paste_x = (target_w - inset_w) // 2
-        canvas.paste(squeezed, (paste_x, 0), squeezed)
-        return canvas
-
-    raise ValueError(f"Unknown notch_mode: {notch_mode!r}")
+    # squeeze
+    fitted = fit_to_target(image, target_w, target_h, fit_mode)
+    squeezed = fitted.resize((content_w, target_h), Image.LANCZOS)
+    canvas = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
+    canvas.paste(squeezed, (paste_x, 0), squeezed)
+    return canvas

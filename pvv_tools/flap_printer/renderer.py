@@ -79,7 +79,7 @@ def _render_custom_flap_images(
         fit = cf.fit_mode or config.global_transforms.fit_mode
         notch = cf.notch_mode or config.global_transforms.notch_mode
         notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
-        img = fit_with_notch_mode(img, target_w, target_h, fit, notch, notch_inset_px)
+        img = fit_with_notch_mode(img, target_w, target_h, fit, notch[0], notch[1], notch_inset_px)
         return slice_display_image(img, dims.flap, dpi)
 
     if cf.type == "multi-module":
@@ -104,7 +104,7 @@ def _render_custom_flap_images(
         column = extract_module_column(img, module_index, cf.module_range, dims.display, dpi)
         flap_w_px = mm_to_px(dims.flap.width, dpi)
         flap_display_h = mm_to_px(dims.flap.display_height, dpi)
-        column = fit_with_notch_mode(column, flap_w_px, flap_display_h, fit, notch, notch_inset_px)
+        column = fit_with_notch_mode(column, flap_w_px, flap_display_h, fit, notch[0], notch[1], notch_inset_px)
         return slice_display_image(column, dims.flap, dpi)
 
     return None  # unknown type
