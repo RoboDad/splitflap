@@ -104,6 +104,20 @@ class OutputConfig:
     calibration_offset_mm: tuple[float, float] = (0.0, 0.0)
 
 
+@dataclass
+class PreviewConfig:
+    """Settings for the contact-sheet module preview image."""
+    enabled: bool = False
+    columns: int = 12
+    cell_padding_mm: float = 3.0
+    flap_color: tuple = (20, 20, 20)           # RGB — physical flap stock colour
+    background_color: tuple = (245, 245, 245)  # RGB — overall canvas background
+    label_color: tuple = (60, 60, 60)          # RGB — label text colour
+    label_font_size_pt: int = 7
+    dpi: int = 96
+    filename: str = "preview.png"
+
+
 VALID_FIT_MODES = ('fit', 'fill', 'stretch', 'contain')
 VALID_NOTCH_MODES = ('none', 'inset', 'squeeze')
 
@@ -191,6 +205,7 @@ class JobConfig:
     display: DisplayConfig = field(default_factory=DisplayConfig)
     jig: JigConfig = field(default_factory=JigConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+    preview: PreviewConfig = field(default_factory=PreviewConfig)
     global_transforms: GlobalTransforms = field(default_factory=GlobalTransforms)
     custom_flaps: list[CustomFlap] = field(default_factory=list)
     dimensions: DimensionOverrides = field(default_factory=DimensionOverrides)
@@ -215,6 +230,36 @@ def _parse_offset(raw) -> tuple[float, float]:
     if len(raw) != 2:
         raise ValueError("output.calibration_offset_mm must be [dx_mm, dy_mm]")
     return (float(raw[0]), float(raw[1]))
+
+
+def _parse_rgb(raw, field_name: str) -> tuple[int, int, int]:
+    """Parse an [R, G, B] list into a (int, int, int) tuple."""
+    if raw is None:
+        raise ValueError(f"{field_name} must be [R, G, B]")
+    if len(raw) != 3:
+        raise ValueError(f"{field_name} must be [R, G, B], got: {raw!r}")
+    return tuple(int(c) for c in raw)
+
+
+def _load_preview(raw: dict) -> PreviewConfig:
+    """Parse the optional 'preview' section from the job config dict."""
+    pv = raw.get('preview', {})
+
+    def _opt_color(key, default):
+        val = pv.get(key)
+        return _parse_rgb(val, f"preview.{key}") if val is not None else default
+
+    return PreviewConfig(
+        enabled=bool(_get(pv, 'enabled', False)),
+        columns=int(_get(pv, 'columns', 12)),
+        cell_padding_mm=float(_get(pv, 'cell_padding_mm', 3.0)),
+        flap_color=_opt_color('flap_color', (20, 20, 20)),
+        background_color=_opt_color('background_color', (245, 245, 245)),
+        label_color=_opt_color('label_color', (60, 60, 60)),
+        label_font_size_pt=int(_get(pv, 'label_font_size_pt', 7)),
+        dpi=int(_get(pv, 'dpi', 96)),
+        filename=str(_get(pv, 'filename', 'preview.png')),
+    )
 
 
 def load_config(path: str | Path) -> JobConfig:
@@ -451,6 +496,7 @@ def load_config(path: str | Path) -> JobConfig:
         display=display,
         jig=jig,
         output=output,
+        preview=_load_preview(raw),
         global_transforms=global_transforms,
         custom_flaps=custom_flaps,
         dimensions=dimensions,

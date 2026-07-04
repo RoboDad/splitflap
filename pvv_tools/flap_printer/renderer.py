@@ -48,6 +48,68 @@ def _load_source_image(flap_cfg: CustomFlap, target_height_px: int) -> Image.Ima
     return img
 
 
+def _render_custom_flap_images(
+    cf: CustomFlap,
+    config: JobConfig,
+    module_index: int,
+    dims: AllDimensions,
+    dpi: float,
+) -> Optional[tuple[Image.Image, Image.Image]]:
+    """Render one CustomFlap to (top_half, bottom_half) at the given DPI.
+
+    Returns None if the flap does not apply to *module_index* (multi-module
+    flaps whose range excludes the requested module).
+    Returns (blank, blank) for blank or disabled flaps.
+    """
+    flap_w = mm_to_px(dims.flap.width, dpi)
+    flap_h = mm_to_px(dims.flap.height, dpi)
+    blank = Image.new('RGBA', (flap_w, flap_h), (0, 0, 0, 0))
+
+    if cf.type == "blank" or not cf.enabled:
+        return blank, blank
+
+    if cf.type == "single":
+        target_w = mm_to_px(dims.flap.width, dpi)
+        target_h = mm_to_px(dims.flap.display_height, dpi)
+        img = _load_source_image(cf, target_h)
+        scale = cf.scale or (config.global_transforms.scale
+                             if config.global_transforms.scale != (1.0, 1.0) else None)
+        crop = cf.crop or config.global_transforms.crop_percent
+        img = apply_transforms(img, scale=scale, crop=crop)
+        fit = cf.fit_mode or config.global_transforms.fit_mode
+        notch = cf.notch_mode or config.global_transforms.notch_mode
+        notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
+        img = fit_with_notch_mode(img, target_w, target_h, fit, notch, notch_inset_px)
+        return slice_display_image(img, dims.flap, dpi)
+
+    if cf.type == "multi-module":
+        if cf.module_range is None:
+            return None
+        start_mod, end_mod = cf.module_range
+        if not (start_mod <= module_index <= end_mod):
+            return None
+        target_h = mm_to_px(dims.flap.display_height, dpi)
+        img = _load_source_image(cf, target_h)
+        scale = cf.scale or (config.global_transforms.scale
+                             if config.global_transforms.scale != (1.0, 1.0) else None)
+        crop = cf.crop or config.global_transforms.crop_percent
+        img = apply_transforms(img, scale=scale, crop=crop)
+        num_span = end_mod - start_mod + 1
+        total_width_mm = num_span * dims.display.module_pitch - dims.display.inter_module_gap
+        target_w = mm_to_px(total_width_mm, dpi)
+        fit = cf.fit_mode or config.global_transforms.fit_mode
+        notch = cf.notch_mode or config.global_transforms.notch_mode
+        notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
+        img = fit_to_target(img, target_w, target_h, fit)
+        column = extract_module_column(img, module_index, cf.module_range, dims.display, dpi)
+        flap_w_px = mm_to_px(dims.flap.width, dpi)
+        flap_display_h = mm_to_px(dims.flap.display_height, dpi)
+        column = fit_with_notch_mode(column, flap_w_px, flap_display_h, fit, notch, notch_inset_px)
+        return slice_display_image(column, dims.flap, dpi)
+
+    return None  # unknown type
+
+
 def _resolve_flaps_for_module(
     config: JobConfig,
     module_index: int,
@@ -60,86 +122,39 @@ def _resolve_flaps_for_module(
     custom flap slot that has content for this module.
     """
     results = []
-
     for cf in config.custom_flaps:
-        if cf.type == "blank":
-            # Blank flap: fully transparent top and bottom halves
-            flap_w = mm_to_px(dims.flap.width, dpi)
-            flap_h = mm_to_px(dims.flap.height, dpi)
-            blank = Image.new('RGBA', (flap_w, flap_h), (0, 0, 0, 0))
-            results.append((blank, blank, cf.label))
-
-        elif cf.type == "single":
-            if not cf.enabled:
-                flap_w = mm_to_px(dims.flap.width, dpi)
-                flap_h = mm_to_px(dims.flap.height, dpi)
-                blank = Image.new('RGBA', (flap_w, flap_h), (0, 0, 0, 0))
-                results.append((blank, blank, cf.label))
-                continue
-            # Single-module images apply to every module identically
-            target_w = mm_to_px(dims.flap.width, dpi)
-            target_h = mm_to_px(dims.flap.display_height, dpi)
-            img = _load_source_image(cf, target_h)
-
-            # Apply per-image transforms, falling back to globals
-            scale = cf.scale or (config.global_transforms.scale
-                                 if config.global_transforms.scale != (1.0, 1.0) else None)
-            crop = cf.crop or config.global_transforms.crop_percent
-            img = apply_transforms(img, scale=scale, crop=crop)
-
-            # Fit to expected display image size: flap_width × display_height
-            fit = cf.fit_mode or config.global_transforms.fit_mode
-            notch = cf.notch_mode or config.global_transforms.notch_mode
-            notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
-            img = fit_with_notch_mode(img, target_w, target_h, fit, notch, notch_inset_px)
-
-            top, bottom = slice_display_image(img, dims.flap, dpi)
-            results.append((top, bottom, cf.label))
-
-        elif cf.type == "multi-module":
-            if cf.module_range is None:
-                continue
-            start_mod, end_mod = cf.module_range
-            if not (start_mod <= module_index <= end_mod):
-                continue  # This image doesn't cover this module
-
-            if not cf.enabled:
-                flap_w = mm_to_px(dims.flap.width, dpi)
-                flap_h = mm_to_px(dims.flap.height, dpi)
-                blank = Image.new('RGBA', (flap_w, flap_h), (0, 0, 0, 0))
-                results.append((blank, blank, cf.label))
-                continue
-
-            target_h = mm_to_px(dims.flap.display_height, dpi)
-            img = _load_source_image(cf, target_h)
-
-            # Apply per-image transforms
-            scale = cf.scale or (config.global_transforms.scale
-                                 if config.global_transforms.scale != (1.0, 1.0) else None)
-            crop = cf.crop or config.global_transforms.crop_percent
-            img = apply_transforms(img, scale=scale, crop=crop)
-
-            # Fit image to expected multi-module span
-            num_span = end_mod - start_mod + 1
-            total_width_mm = num_span * dims.display.module_pitch - dims.display.inter_module_gap
-            target_w = mm_to_px(total_width_mm, dpi)
-            fit = cf.fit_mode or config.global_transforms.fit_mode
-            notch = cf.notch_mode or config.global_transforms.notch_mode
-            notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
-            img = fit_to_target(img, target_w, target_h, fit)
-
-            # Extract this module's column
-            column = extract_module_column(img, module_index, cf.module_range, dims.display, dpi)
-
-            # Fit column to exact flap dimensions (notch_mode applied here)
-            flap_w = mm_to_px(dims.flap.width, dpi)
-            flap_display_h = mm_to_px(dims.flap.display_height, dpi)
-            column = fit_with_notch_mode(column, flap_w, flap_display_h, fit, notch, notch_inset_px)
-
-            top, bottom = slice_display_image(column, dims.flap, dpi)
-            results.append((top, bottom, cf.label))
-
+        pair = _render_custom_flap_images(cf, config, module_index, dims, dpi)
+        if pair is not None:
+            results.append((*pair, cf.label))
     return results
+
+
+def _collect_preview_entries(
+    config: JobConfig,
+    dims: AllDimensions,
+    dpi: float,
+) -> list[tuple[Image.Image, Image.Image, str]]:
+    """Collect (top_half, bottom_half, label) for every unique displayable slot.
+
+    Single / glyph / emoji / blank flaps appear once.
+    Multi-module flaps appear once per module in their range.
+    Labels include both the flap label and the slot index (user preference).
+    """
+    entries = []
+    for cf in config.custom_flaps:
+        if cf.type == "multi-module" and cf.module_range:
+            start, end = cf.module_range
+            for m in range(start, end + 1):
+                pair = _render_custom_flap_images(cf, config, m, dims, dpi)
+                if pair is not None:
+                    label = f"{cf.label} M{m} · #{cf.slot}"
+                    entries.append((*pair, label))
+        else:
+            pair = _render_custom_flap_images(cf, config, 0, dims, dpi)
+            if pair is not None:
+                label = f"{cf.label} · #{cf.slot}"
+                entries.append((*pair, label))
+    return entries
 
 
 def _get_modules_to_process(config: JobConfig, module_filter: Optional[list[int]]) -> list[int]:
@@ -290,5 +305,16 @@ def render_job(
 
             generated.extend([front_path, back_path])
             logger.info("Wrote %s, %s", front_path, back_path)
+
+    # Generate preview if enabled (uses a separate lower DPI for screen output)
+    if config.preview.enabled:
+        from .previewer import generate_preview
+        preview_dpi = float(config.preview.dpi)
+        logger.info("Generating preview at %g DPI", preview_dpi)
+        preview_entries = _collect_preview_entries(config, dims, preview_dpi)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        preview_path = generate_preview(preview_entries, config, dims, out_dir)
+        if preview_path:
+            generated.append(preview_path)
 
     return generated

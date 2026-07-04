@@ -158,6 +158,39 @@ See `example_job.json` for a complete example. The config has five sections:
 > match the image canvas. If you intend to use Camera mode, set
 > `canvas_size_mm: [90, 335]`.
 
+### `preview` — Module preview contact sheet
+
+Optional section. When `enabled` is `true`, a contact-sheet PNG is written
+to the same output directory as the print images (e.g. `output/preview.png`).
+Each cell shows one flap slot rendered as it would appear on the physical
+display: two flap halves separated by the real gap, with the physical flap
+shape drawn in `flap_color` and the artwork alpha-composited on top.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Generate the preview image |
+| `columns` | int | `12` | Number of cells per row in the grid |
+| `cell_padding_mm` | float | `3.0` | Gap between cells and around the grid border (mm) |
+| `flap_color` | `[R, G, B]` | `[20, 20, 20]` | Physical flap stock colour |
+| `background_color` | `[R, G, B]` | `[245, 245, 245]` | Overall canvas background colour |
+| `label_color` | `[R, G, B]` | `[60, 60, 60]` | Label text colour |
+| `label_font_size_pt` | int | `7` | Label font size in points |
+| `dpi` | int | `96` | Preview image resolution (screen DPI, independent of print DPI) |
+| `filename` | string | `"preview.png"` | Output filename (written into the root output directory) |
+
+The label below each cell shows both the `label` field and the `slot` index
+(e.g. `PVV42 · #0`). Multi-module flaps show one cell per module with the
+module index appended (e.g. `EP47 M5 · #2`).
+
+Example minimal config to add to any job:
+
+```json
+"preview": {
+  "enabled": true,
+  "columns": 12
+}
+```
+
 ### `global_transforms` — Default image transforms
 
 Applied to all input images unless overridden per-flap.
@@ -257,6 +290,9 @@ The full transformation chain from input image to output print file:
 10. **Mask** — Ink-save mask zeros alpha outside flap pockets (+ bleed)
 11. **Labels** — EP labels rendered in gap margins
 12. **Save** — PNG with embedded DPI metadata
+13. **Preview** — If `preview.enabled`, a contact-sheet grid is written to the
+    root output directory at `preview.dpi` (default 96 DPI, independent of
+    print DPI).
 
 ### Input Images
 
@@ -464,7 +500,8 @@ pvv_tools/
                         # slice_display_image, extract_module_column
     layout.py           # FlapSide, batch grouping, jig flip, ink-save mask
     labels.py           # EP label rendering
-    renderer.py         # Pipeline orchestrator (load -> slice -> layout -> save)
+    previewer.py        # contact-sheet preview grid generator
+    renderer.py         # Pipeline orchestrator (load -> slice -> layout -> save -> preview)
   scad/
     epilogue_flap_single.scad   # SCAD wrapper used by the glyph generator
   assets/
