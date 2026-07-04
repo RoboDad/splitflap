@@ -151,3 +151,45 @@ def fit_to_target(
         return canvas
 
     raise ValueError(f"Unknown fit_mode: {mode!r}")
+
+
+def fit_with_notch_mode(
+    image: Image.Image,
+    target_w: int,
+    target_h: int,
+    fit_mode: str,
+    notch_mode: str,
+    notch_inset_px: int,
+) -> Image.Image:
+    """Apply fit_mode with an optional notch-clearance modifier.
+
+    notch_mode values:
+      'none'    Standard fit_to_target(target_w, target_h) — no notch handling.
+      'inset'   Fit within (target_w - 2*notch_inset_px) x target_h using
+                fit_mode, then center the result on the full target_w canvas.
+                Aspect ratio is preserved; the image may be smaller overall.
+      'squeeze' Fit to the full target_w x target_h first (standard fit_mode),
+                then non-uniformly scale the result to notch-safe width while
+                keeping height fixed. Aspect ratio changes; height is locked.
+    """
+    if notch_mode == 'none' or notch_inset_px <= 0:
+        return fit_to_target(image, target_w, target_h, fit_mode)
+
+    inset_w = max(1, target_w - 2 * notch_inset_px)
+
+    if notch_mode == 'inset':
+        fitted = fit_to_target(image, inset_w, target_h, fit_mode)
+        canvas = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
+        paste_x = (target_w - inset_w) // 2
+        canvas.paste(fitted, (paste_x, 0), fitted)
+        return canvas
+
+    if notch_mode == 'squeeze':
+        fitted = fit_to_target(image, target_w, target_h, fit_mode)
+        squeezed = fitted.resize((inset_w, target_h), Image.LANCZOS)
+        canvas = Image.new('RGBA', (target_w, target_h), (0, 0, 0, 0))
+        paste_x = (target_w - inset_w) // 2
+        canvas.paste(squeezed, (paste_x, 0), squeezed)
+        return canvas
+
+    raise ValueError(f"Unknown notch_mode: {notch_mode!r}")

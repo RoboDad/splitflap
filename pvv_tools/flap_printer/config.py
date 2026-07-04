@@ -105,13 +105,15 @@ class OutputConfig:
 
 
 VALID_FIT_MODES = ('fit', 'fill', 'stretch', 'contain')
+VALID_NOTCH_MODES = ('none', 'inset', 'squeeze')
 
 
 @dataclass
 class GlobalTransforms:
     scale: tuple[float, float] = (1.0, 1.0)
     crop_percent: Optional[tuple[float, float, float, float]] = None  # (left%, top%, right%, bottom%)
-    fit_mode: str = 'fit'  # 'fit' | 'fill' | 'stretch' | 'contain'
+    fit_mode: str = 'fit'    # 'fit' | 'fill' | 'stretch' | 'contain'
+    notch_mode: str = 'none' # 'none' | 'inset' | 'squeeze'
 
 
 @dataclass
@@ -123,7 +125,8 @@ class CustomFlap:
     module_range: Optional[tuple[int, int]] = None  # inclusive [start, end] for multi-module
     scale: Optional[tuple[float, float]] = None
     crop: Optional[tuple[float, float, float, float]] = None  # (left%, top%, right%, bottom%)
-    fit_mode: Optional[str] = None  # per-image override; None = use global default
+    fit_mode: Optional[str] = None    # per-image override; None = use global default
+    notch_mode: Optional[str] = None  # 'none' | 'inset' | 'squeeze'; None = use global default
     enabled: bool = True  # False → output is 100% transparent; slot position preserved
 
     # Resolved at load time
@@ -294,9 +297,12 @@ def load_config(path: str | Path) -> JobConfig:
         scale=tuple(scale_raw) if scale_raw else (1.0, 1.0),
         crop_percent=tuple(crop_raw) if crop_raw else None,
         fit_mode=_get(gt, 'fit_mode', 'fit'),
+        notch_mode=_get(gt, 'notch_mode', 'none'),
     )
     if global_transforms.fit_mode not in VALID_FIT_MODES:
         raise ValueError(f"Invalid global fit_mode: {global_transforms.fit_mode!r} (expected one of {VALID_FIT_MODES})")
+    if global_transforms.notch_mode not in VALID_NOTCH_MODES:
+        raise ValueError(f"Invalid global notch_mode: {global_transforms.notch_mode!r} (expected one of {VALID_NOTCH_MODES})")
 
     # Custom flaps
     custom_flaps = []
@@ -406,12 +412,15 @@ def load_config(path: str | Path) -> JobConfig:
             scale=tuple(scale) if scale else None,
             crop=tuple(crop) if crop else None,
             fit_mode=cf.get('fit_mode', None),
+            notch_mode=cf.get('notch_mode', None),
             enabled=bool(cf.get('enabled', True)),
             source_path=source_path,
         )
 
         if flap.fit_mode is not None and flap.fit_mode not in VALID_FIT_MODES:
             raise ValueError(f"custom_flaps[{i}]: invalid fit_mode {flap.fit_mode!r} (expected one of {VALID_FIT_MODES})")
+        if flap.notch_mode is not None and flap.notch_mode not in VALID_NOTCH_MODES:
+            raise ValueError(f"custom_flaps[{i}]: invalid notch_mode {flap.notch_mode!r} (expected one of {VALID_NOTCH_MODES})")
 
         if flap.type == 'multi-module' and flap.module_range is None:
             raise ValueError(f"custom_flaps[{i}]: 'module_range' is required for multi-module type")

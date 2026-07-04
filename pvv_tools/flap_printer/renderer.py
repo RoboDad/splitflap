@@ -11,7 +11,7 @@ from PIL import Image
 
 from .config import JobConfig, CustomFlap
 from .dimensions import AllDimensions, FlapDimensions, JigDimensions, DisplayDimensions, mm_to_px
-from .slicer import slice_display_image, extract_module_column, apply_transforms, fit_to_target
+from .slicer import slice_display_image, extract_module_column, apply_transforms, fit_to_target, fit_with_notch_mode
 from .layout import FlapSide, map_images_to_flap_sides, generate_batch_image, apply_flip_transform, apply_ink_save_mask, reorder_for_jig_flip
 from .labels import render_labels
 from . import svg_loader
@@ -89,7 +89,9 @@ def _resolve_flaps_for_module(
 
             # Fit to expected display image size: flap_width × display_height
             fit = cf.fit_mode or config.global_transforms.fit_mode
-            img = fit_to_target(img, target_w, target_h, fit)
+            notch = cf.notch_mode or config.global_transforms.notch_mode
+            notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
+            img = fit_with_notch_mode(img, target_w, target_h, fit, notch, notch_inset_px)
 
             top, bottom = slice_display_image(img, dims.flap, dpi)
             results.append((top, bottom, cf.label))
@@ -122,15 +124,17 @@ def _resolve_flaps_for_module(
             total_width_mm = num_span * dims.display.module_pitch - dims.display.inter_module_gap
             target_w = mm_to_px(total_width_mm, dpi)
             fit = cf.fit_mode or config.global_transforms.fit_mode
+            notch = cf.notch_mode or config.global_transforms.notch_mode
+            notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
             img = fit_to_target(img, target_w, target_h, fit)
 
             # Extract this module's column
             column = extract_module_column(img, module_index, cf.module_range, dims.display, dpi)
 
-            # Fit column to exact flap dimensions
+            # Fit column to exact flap dimensions (notch_mode applied here)
             flap_w = mm_to_px(dims.flap.width, dpi)
             flap_display_h = mm_to_px(dims.flap.display_height, dpi)
-            column = fit_to_target(column, flap_w, flap_display_h, fit)
+            column = fit_with_notch_mode(column, flap_w, flap_display_h, fit, notch, notch_inset_px)
 
             top, bottom = slice_display_image(column, dims.flap, dpi)
             results.append((top, bottom, cf.label))
