@@ -225,3 +225,45 @@ SCAD rather than SCAD driving Python.
   fully transparent.
 - Large placeholder PNG/HEIC test images added to `test_images/placeholders/` this
   session are not committed (large binary blobs; not referenced by any tracked job file).
+
+## 2026-07-03 - flap_printer: glyph type, emoji type, batch tools
+
+- **Model:** Claude Sonnet 4.6
+- **Commits:** 53e8e1b, 2fa78f6, 3e64f0c
+- **Files touched:**
+  - `pvv_tools/flap_printer/config.py` (glyph type + emoji type)
+  - `pvv_tools/generate_epilogue_flap_svgs.py` (default output dir from --font)
+  - `pvv_tools/download_emoji.py` (new — Twemoji SVG downloader)
+  - `pvv_tools/requirements.txt` (added emoji>=2.0)
+  - `pvv_tools/gen_glyphs.bat` (new — batch glyph regeneration)
+  - `pvv_tools/gen_emojis.bat` (new — batch emoji download)
+  - `pvv_tools/assets/epilogue_flaps/` → `pvv_tools/assets/flap_glyphs/Epilogue/` (git mv)
+  - `pvv_tools/assets/flap_glyphs/Roboto/` (new — 52 Roboto glyph SVGs)
+  - `pvv_tools/assets/emoji/heart.svg`, `waving-hand-medium-skin-tone.svg` (new)
+  - `pvv_tools/README.md` (glyph/emoji types, setup section, generator docs)
+  - `.gitignore` (desktop.ini, *.heic, placeholder PNGs)
+
+### Goal
+Add multi-font glyph support and color emoji support to flap_printer.
+Also improve setup docs and add batch convenience scripts.
+
+### Changes
+- New `"glyph"` flap type: `{"type":"glyph","font":"Roboto","char":"A"}` — reads
+  from `assets/flap_glyphs/<font>/`. `"epilogue"` remains as backward-compat alias.
+- Moved `assets/epilogue_flaps/` → `assets/flap_glyphs/Epilogue/` (history preserved).
+- Generator default output dir now auto-computed as `assets/flap_glyphs/<font>/`.
+- New `"emoji"` flap type: `{"type":"emoji","name":"heart"}` or `{"type":"emoji","char":"❤️"}`.
+  Resolves to `assets/emoji/<name>.svg`; files downloaded by `download_emoji.py`.
+- `download_emoji.py`: fetches Twemoji SVGs via jsDelivr CDN, names by CLDR shortname,
+  prints job JSON snippet. Added `--codepoints` flag as fallback for batch files where
+  literal emoji are mangled by cmd.exe code page.
+- `gen_glyphs.bat` / `gen_emojis.bat`: one-line-per-font/emoji batch files;
+  activate venv + `chcp 65001` for UTF-8 handling.
+- README Quick Start now covers venv creation + both requirements files.
+- Fixed variable-shadowing bug: `raw` (demojize result) was overwriting `raw` (parsed JSON).
+
+### Notes / decisions
+- Twemoji coverage: Unicode 14.0 / Emoji 14.0 (~3,600 emoji); newer sequences not available.
+- Color fonts (Segoe UI Emoji etc.) can't be used in OpenSCAD; emoji path uses pre-built SVGs.
+- `chcp 65001` in batch files fixes cmd.exe code page mangling of emoji literals.
+- `--codepoints 2764-fe0f` is the reliable fallback when literal chars still corrupt.
