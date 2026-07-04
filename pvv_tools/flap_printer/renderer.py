@@ -73,6 +73,9 @@ def _render_custom_flap_images(
     if cf.type == "blank" or not cf.enabled:
         return blank, blank
 
+    # Per-flap bleed override: bleed=False suppresses edge expansion for this image
+    effective_bleed_px = bleed_px if cf.bleed else 0
+
     if cf.type == "single":
         target_w = mm_to_px(dims.flap.width, dpi)
         target_h = mm_to_px(dims.flap.display_height, dpi)
@@ -84,7 +87,7 @@ def _render_custom_flap_images(
         fit = cf.fit_mode or config.global_transforms.fit_mode
         notch = cf.notch_mode or config.global_transforms.notch_mode
         notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
-        img = fit_with_notch_mode(img, target_w, target_h, fit, notch[0], notch[1], notch_inset_px, bleed_px)
+        img = fit_with_notch_mode(img, target_w, target_h, fit, notch[0], notch[1], notch_inset_px, effective_bleed_px)
         bleed_y = max(0, (img.height - mm_to_px(dims.flap.display_height, dpi)) // 2)
         return slice_display_image(img, dims.flap, dpi, bleed_y=bleed_y)
 
@@ -110,7 +113,7 @@ def _render_custom_flap_images(
         column = extract_module_column(img, module_index, cf.module_range, dims.display, dpi)
         flap_w_px = mm_to_px(dims.flap.width, dpi)
         flap_display_h = mm_to_px(dims.flap.display_height, dpi)
-        column = fit_with_notch_mode(column, flap_w_px, flap_display_h, fit, notch[0], notch[1], notch_inset_px, bleed_px)
+        column = fit_with_notch_mode(column, flap_w_px, flap_display_h, fit, notch[0], notch[1], notch_inset_px, effective_bleed_px)
         bleed_y = max(0, (column.height - mm_to_px(dims.flap.display_height, dpi)) // 2)
         return slice_display_image(column, dims.flap, dpi, bleed_y=bleed_y)
 

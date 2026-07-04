@@ -141,6 +141,7 @@ class CustomFlap:
     crop: Optional[tuple[float, float, float, float]] = None  # (left%, top%, right%, bottom%)
     fit_mode: Optional[str] = None    # per-image override; None = use global default
     notch_mode: Optional[tuple[str, str]] = None  # (left, right); None = use global default
+    bleed: bool = True   # False → skip bleed edge-expansion for this image (ink-save mask still applied)
     enabled: bool = True  # False → output is 100% transparent; slot position preserved
 
     # Resolved at load time
@@ -478,6 +479,7 @@ def load_config(path: str | Path) -> JobConfig:
             crop=tuple(crop) if crop else None,
             fit_mode=cf.get('fit_mode', None),
             notch_mode=_parse_notch_mode(cf['notch_mode'], f"custom_flaps[{i}].notch_mode") if cf.get('notch_mode') is not None else None,
+            bleed=bool(cf.get('bleed', True)),
             enabled=bool(cf.get('enabled', True)),
             source_path=source_path,
         )

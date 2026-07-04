@@ -133,7 +133,7 @@ See `example_job.json` for a complete example. The config has five sections:
 |-----|------|---------|-------------|
 | `dpi` | int | `360` | Output resolution in dots per inch |
 | `format` | string | `"png"` | Output image format |
-| `bleed_mm` | float | `1.0` | Ink-save mask bleed beyond flap pocket edges (mm) |
+| `bleed_mm` | float | `1.0` | Bleed expansion and ink-save mask margin beyond the flap pocket edge (mm). See [Bleed Margin](#bleed-margin). |
 | `ink_save_mask` | bool | `true` | Zero alpha outside flap pockets to save ink |
 | `labels` | bool | `true` | Render EP slot labels in the gap areas |
 | `label_font_size_pt` | int | `6` | Label font size in points |
@@ -219,6 +219,7 @@ An array of objects, one per custom flap. Required fields: `slot`, `source`.
 | `crop` | [L, T, R, B] | `null` | Per-image crop override `[left%, top%, right%, bottom%]`; `null` = use global |
 | `fit_mode` | string | `null` | Per-image fit mode override; `null` = use global default |
 | `notch_mode` | string or `[left, right]` | `null` | Per-image notch-clearance override; `null` = use global default |
+| `bleed` | bool | `true` | When `false`, skips bleed edge-expansion for this image (the ink-save mask still applies). Useful for images with transparent backgrounds at their edges that don't need the misalignment buffer. |
 | `enabled` | bool | `true` | When `false`, output for this flap is fully transparent; the slot position is preserved in the layout. Useful for temporarily disabling a slot without removing it from the config. |
 
 ---
@@ -318,10 +319,10 @@ The full transformation chain from input image to output print file:
 5. **Slice** — Split into top half (43mm) and bottom half (43mm); 2mm gap discarded
 6. **Map to flap sides** — Front of flap K = top(K), back of flap K = bottom(K+1)
 7. **Batch** — Group into jig-sized batches (6 flaps per batch)
-8. **Layout + Bleed Expansion** — Place on printable-area canvas (88 × 330mm)
-   with insert offset.  Each flap image is upscaled by 2 × `bleed_mm` in each
-   dimension and pasted centred on its pocket position so that the bleed zone
-   contains real image content rather than transparency (see
+8. **Layout** — Place on printable-area canvas (88 × 330mm) with insert
+   offset. Images that have been bleed-expanded in step 4 are pasted offset
+   by their bleed amount so the pocket area aligns with its grid position
+   and the overflow extends into the bleed zone (see
    [Bleed Margin](#bleed-margin) below).
 9. **Flip** — Back-side flaps reordered to their post-jig-flip grid positions
    (individual flap content is **not** mirrored)
@@ -417,35 +418,64 @@ treated identically to raster inputs once loaded:
 
 ### Bleed Margin
 
-The `bleed_mm` setting (default `1.0`) controls a border of extra image
-content around each flap pocket.  It serves two purposes:
+The `bleed_mm` setting (default `1.0`) controls two related but distinct
+behaviors:
 
-1. **Ink saving** — The ink-save mask (step 10) zeros alpha outside of
-   `pocket + bleed`, so no ink is wasted on areas that will never be
-   visible on the finished flap.
-2. **Misalignment tolerance** — The 3D-printed jig introduces small
-   mechanical tolerances. If the flap image ended exactly at the pocket
-   edge, any sub-mm shift would expose bare flap stock alongside the
-   image. The bleed expansion fills this border with real image content.
+#### A — Ink-save mask expansion
 
-How it works:
+The ink-save mask (step 10) always clips alpha to the flap outline
+expanded outward by `bleed_mm` on all sides. This prevents ink from being
+wasted on the jig body, with a small buffer around the cut line.
+
+#### B — Per-edge image content expansion (misalignment tolerance)
+
+The 3D-printed jig introduces small mechanical tolerances. If an image that
+is supposed to fill to the flap edge stops exactly at the pocket boundary,
+even a 0.5 mm mis-cut could expose a thin strip of bare flap stock.
+
+To prevent this, the fit target is expanded outward by `bleed_mm` on **flush
+edges** — edges where the image content is supposed to fill all the way to the
+boundary. The image is then fit to the expanded target and naturally overflows
+the pocket by `bleed_mm` on those sides. Non-flush edges (where the image has
+letterbox bars or transparent padding) are **not** expanded, since bare stock
+was always expected there.
 
 ```
-          bleed
-        ◄───────►
-   ┌─────────────────────┐
-   │ ╔═════════════════╗ │  ← pocket boundary
-   │ ║                 ║ │
-   │ ║   flap image    ║ │  ← image upscaled to pocket + 2×bleed
-   │ ║                 ║ │
-   │ ╚═════════════════╝ │
-   └─────────────────────┘
-     ▲ ink-save mask clips here (pocket + bleed)
+flush edge (fill / width-constrained fit):
+
+         bleed
+       ◄───────►
+  ┌───────────────────────┐
+  │  ╔═════════════════╗  │  ← pocket boundary
+  │  ║ image overflows ║  │
+  │  ╚═════════════════╝  │  ← bleed content extends beyond pocket
+  └───────────────────────┘
+    ▲ ink-save mask clips here
+
+non-flush edge (fit with letterbox bars on that axis): no expansion
 ```
 
-At 360 DPI with a 1 mm bleed, each flap image is enlarged by ~28 px per
-side (≈ 3.7 % upscale on a 766 px-wide pocket). This is visually
-imperceptible but ensures the bleed zone is always filled.
+**Flush-edge rules by fit mode:**
+
+| Fit mode | flush x (left/right) | flush y (top/bottom) |
+|----------|----------------------|----------------------|
+| `fill` | always (unless `notch_mode=inset`) | always |
+| `fit` — image wider than pocket ratio | yes | no (bars top/bottom) |
+| `fit` — image taller than pocket ratio | no (bars left/right) | yes |
+| `stretch` | always | always |
+| `contain` | never | never |
+
+Notch modes affect x-flush: with `notch_mode=inset`, the notch sides are
+transparent clearance zones and are never treated as flush. With
+`notch_mode=none` or `squeeze`, the x-flush determination follows the
+fit-mode rule above.
+
+To disable bleed expansion for a specific image (e.g., an emoji on a
+transparent background that doesn't need the buffer), set `"bleed": false`
+on that `custom_flaps` entry. The ink-save mask (behavior A) still applies.
+
+At 508 DPI with 1 mm bleed, the expansion is ~20 px per flush edge
+(≈ 3.7 % on a 54 mm-wide pocket, ≈ 4.7 % on a 43 mm-tall half).
 
 ---
 
@@ -569,10 +599,14 @@ pvv_tools/
    1. Calls `_load_source_image(flap_cfg, target_h)` which dispatches on
       file extension: SVG -> `svg_loader.load_svg`, otherwise PIL `open`.
    2. Applies per-image or global `scale` / `crop` (`slicer.apply_transforms`).
-   3. Resizes to the canonical display-face size via
-      `slicer.fit_to_target` using the active `fit_mode`.
+   3. Fits to the display-face target via `slicer.fit_with_notch_mode` (which
+      calls `slicer.fit_to_target` internally).  When `bleed_mm > 0` and
+      `bleed: true` for the flap, the target rect is expanded outward by
+      `bleed_mm` on flush edges before fitting, so the returned image
+      overflows the pocket on those sides with real content.
    4. Slices into top/bottom halves with `slicer.slice_display_image`
-      (top `flap_height` mm, skip `flap_gap` mm, then `flap_height` mm).
+      (top `flap_height` mm + any top bleed, skip `flap_gap` mm, then
+      `flap_height` mm + any bottom bleed).
    5. For `multi-module`, the full multi-flap image is fit to the
       combined span first (`module_pitch * num_span - inter_module_gap`),
       then `slicer.extract_module_column` cuts out this module's column,
@@ -582,9 +616,11 @@ pvv_tools/
 5. **Batch grouping** + **layout** (`layout.generate_batch_image`):
    slots are grouped into jig-sized batches (`jig_num_x * jig_num_y`).
    Each slot's flap image is pasted onto a transparent
-   `printable_width x printable_height` canvas at the precomputed pocket
-   position; the paste is **upscaled by `2 * bleed_mm`** so the bleed
-   zone is filled with real content.
+   `printable_width x printable_height` canvas.  The paste position is
+   offset by the image's bleed amount (derived from `image.size` vs
+   pocket size) so the pocket area aligns with its grid coordinates and
+   bleed content extends beyond. Front batches offset upward (outer display
+   edge), back batches offset downward.
 6. **Jig flip** (`layout.apply_flip_transform` / `reorder_for_jig_flip`):
    When the operator flips the laser-cut jig (left-right or front-back)
    to print the back side, the flaps remain physically in place but their
