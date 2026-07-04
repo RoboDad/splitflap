@@ -167,6 +167,7 @@ Applied to all input images unless overridden per-flap.
 | `scale` | [float, float] | `[1.0, 1.0]` | Scale multiplier `[sx, sy]` applied after crop |
 | `crop_percent` | [L, T, R, B] | `null` | Percentage to trim from each edge: `[left%, top%, right%, bottom%]` |
 | `fit_mode` | string | `"fit"` | How images are fit to the target flap area (see [Fit Modes](#fit-modes)) |
+| `notch_mode` | string | `"none"` | Notch-clearance modifier applied after fitting (see [Notch Modes](#notch-modes)) |
 
 ### `custom_flaps` — Flap definitions
 
@@ -184,6 +185,7 @@ An array of objects, one per custom flap. Required fields: `slot`, `source`.
 | `scale` | [float, float] | `null` | Per-image scale override `[sx, sy]`; `null` = use global |
 | `crop` | [L, T, R, B] | `null` | Per-image crop override `[left%, top%, right%, bottom%]`; `null` = use global |
 | `fit_mode` | string | `null` | Per-image fit mode override; `null` = use global default |
+| `notch_mode` | string | `null` | Per-image notch-clearance override; `null` = use global default |
 
 ---
 
@@ -204,6 +206,29 @@ and/or per-image via `fit_mode` on individual `custom_flaps` entries.
 maps onto the flaps. Switch to `"fill"` if you prefer edge-to-edge coverage
 and don't mind losing some border. Use `"stretch"` only if the image is already
 at the correct aspect ratio and you want pixel-exact mapping.
+
+---
+
+## Notch Modes
+
+Flaps have a notch cutout (default depth `3.2 mm`) on each side at the spool
+pin location. If an image fills the full `54 mm` width, the edges of the image
+will be hidden behind the notch walls. `notch_mode` controls how the image is
+adjusted to account for this.
+
+Set globally in `global_transforms.notch_mode` and/or per-image via `notch_mode`
+on individual `custom_flaps` entries. The effective safe width is
+`flap_width - 2 × notch_depth` (default: 54 - 2×3.2 = **47.6 mm**).
+
+| Mode | Behavior |
+|------|-----------|
+| **`none`** (default) | No adjustment. Image fills the full 54 mm canvas. Use for text/character glyphs that already stay clear of the notch zone. |
+| **`inset`** | Image is fit into the **safe-width** canvas (47.6 mm), then centered on the full 54 mm canvas with transparent bands at the sides. Best for emoji/icons where you want the full image visible. |
+| **`squeeze`** | Image is fit to the full 54 mm canvas as normal, then **non-uniformly scaled** to the safe width. Height is unchanged; the image is slightly narrower. Best when you want edge-to-edge coverage and a small aspect-ratio change is acceptable. |
+
+**Choosing a mode:** Use `"inset"` for icons and emoji — content is untouched
+but the sides will not be visible past the notch. Use `"squeeze"` when the
+slight horizontal compression is preferable to visible letterbox bands.
 
 ---
 
@@ -433,8 +458,8 @@ pvv_tools/
     dimensions.py       # FlapDimensions / JigDimensions / DisplayDimensions
     scad_parser.py      # OpenSCAD subprocess + echo-output parsing + cache
     svg_loader.py       # is_svg() + load_svg() (resvg-py wrapper)
-    slicer.py           # apply_transforms, fit_to_target, slice_display_image,
-                        # extract_module_column
+    slicer.py           # apply_transforms, fit_to_target, fit_with_notch_mode,
+                        # slice_display_image, extract_module_column
     layout.py           # FlapSide, batch grouping, jig flip, ink-save mask
     labels.py           # EP label rendering
     renderer.py         # Pipeline orchestrator (load -> slice -> layout -> save)
