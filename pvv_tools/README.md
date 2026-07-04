@@ -177,8 +177,8 @@ An array of objects, one per custom flap. Required fields: `slot`, `source`.
 |-----|------|---------|-------------|
 | `slot` | int | *required* | 0-based index in the custom flap sequence |
 | `label` | string | `"EP{slot+42}"` | Display label (e.g. `"EP42"`) |
-| `source` | string | *required* (except `blank`/`epilogue`) | Image path (PNG/JPEG/SVG), relative to the JSON config file's directory |
-| `type` | string | `"single"` | `"single"`, `"multi-module"`, `"blank"`, or `"epilogue"` (see [Custom Flap Types](#custom-flap-types)) |
+| `source` | string | *required* (except `blank`, `glyph`, `emoji`, `epilogue`) | Image path (PNG/JPEG/SVG), relative to the JSON config file's directory |
+| `type` | string | `"single"` | `"single"`, `"multi-module"`, `"blank"`, `"glyph"`, `"emoji"`, or `"epilogue"` (see [Custom Flap Types](#custom-flap-types)) |
 | `module_range` | [int, int] | `null` | Required for `multi-module`: inclusive range `[start, end]` |
 | `index` | int | `null` | Required for `epilogue` if `char` is not given; 0-based index into the standard 52-flap character set |
 | `char` | string | `null` | Required for `epilogue` if `index` is not given; single character from the standard 52-flap set |
@@ -186,6 +186,7 @@ An array of objects, one per custom flap. Required fields: `slot`, `source`.
 | `crop` | [L, T, R, B] | `null` | Per-image crop override `[left%, top%, right%, bottom%]`; `null` = use global |
 | `fit_mode` | string | `null` | Per-image fit mode override; `null` = use global default |
 | `notch_mode` | string | `null` | Per-image notch-clearance override; `null` = use global default |
+| `enabled` | bool | `true` | When `false`, output for this flap is fully transparent; the slot position is preserved in the layout. Useful for temporarily disabling a slot without removing it from the config. |
 
 ---
 
@@ -239,7 +240,8 @@ The full transformation chain from input image to output print file:
 1. **Load** — Source image opened as RGBA (any pixel size)
 2. **Crop** — Per-image `crop` or fallback to `global_transforms.crop_percent`
 3. **Scale** — Per-image `scale` or fallback to `global_transforms.scale`
-4. **Fit** — Image fit to target dimensions using the selected `fit_mode`
+4. **Fit + Notch** — Image fit to target dimensions using `fit_mode`; then
+   `notch_mode` adjusts the result to clear the spool-pin notch cutouts
    - Single: target = `flap_width` × `display_height` (54 × 88 mm)
    - Multi-module: target = full span width × `display_height`
 5. **Slice** — Split into top half (43mm) and bottom half (43mm); 2mm gap discarded
