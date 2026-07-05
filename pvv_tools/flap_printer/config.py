@@ -313,7 +313,7 @@ def load_config(path: str | Path) -> JobConfig:
     j = raw.get('jig', {})
     jig = JigConfig(
         type=_get(j, 'type', 'minibed'),
-        flip_mode=_get(j, 'flip_mode', 'left-right'),
+        flip_mode=_get(j, 'flip_mode', 'front-back'),
         output_orientation=_get(j, 'output_orientation', 'landscape'),
         num_flaps_x=int(_get(j, 'num_flaps_x', 1)),
         num_flaps_y=int(_get(j, 'num_flaps_y', 6)),

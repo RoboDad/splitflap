@@ -18,7 +18,7 @@ except ImportError:
 from .config import JobConfig, CustomFlap
 from .dimensions import AllDimensions, FlapDimensions, JigDimensions, DisplayDimensions, mm_to_px
 from .slicer import slice_display_image, extract_module_column, apply_transforms, fit_to_target, fit_with_notch_mode
-from .layout import FlapSide, map_images_to_flap_sides, generate_batch_image, apply_flip_transform, apply_ink_save_mask, reorder_for_jig_flip
+from .layout import map_images_to_flap_sides, generate_batch_image, apply_ink_save_mask, reorder_for_jig_flip
 from .labels import render_labels
 from . import svg_loader
 
@@ -408,14 +408,26 @@ def render_job(
             front_batch = fronts[start:end]
             back_batch = backs[start:end]
 
+            # --- Back-side jig-flip geometry -------------------------------
+            # A front-back (pancake) flip is geometrically identical to a
+            # left-right flip followed by an in-plane 180° rotation:
+            #     reflect_x  ==  rotate180 ∘ reflect_y
+            # So the back sheet that registers correctly under a front-back
+            # flip is exactly the left-right back sheet rotated 180°.
+            # We therefore always BUILD the back using left-right semantics
+            # (reorder + spool-at-top), then rotate the finished back image
+            # 180° when the job is in front-back mode.  This keeps a single,
+            # verified code path for both flip modes and guarantees the flap
+            # frame (pins/notches/rounded corners) and content stay aligned
+            # after the physical flip.
+            back_build_flip = "left-right"
+
             # Generate front image
             front_img = generate_batch_image(front_batch, dims.flap, dims.jig, dims.printable, dpi, orient,
                                              spool_at_bottom=True)
 
             # Reorder back-side flaps to their post-jig-flip grid positions.
-            # This reverses the flap order (correct for physical jig flip)
-            # without mirroring individual flap content.
-            reordered_back = reorder_for_jig_flip(back_batch, dims.jig, flip, orient)
+            reordered_back = reorder_for_jig_flip(back_batch, dims.jig, back_build_flip, orient)
             back_img = generate_batch_image(reordered_back, dims.flap, dims.jig, dims.printable, dpi, orient,
                                             spool_at_bottom=False)
 
@@ -432,6 +444,14 @@ def render_job(
                                           config.output.label_font_size_pt, orient)
                 back_img = render_labels(back_img, reordered_back, dims.flap, dims.jig, dims.printable, dpi,
                                          config.output.label_font_size_pt, orient)
+
+            # Front-back flip == left-right flip + 180° in-plane rotation.
+            # Rotate the fully-composed (art + mask + labels) back sheet 180°
+            # so it registers under a front-back jig flip.  Done before
+            # registration marks and calibration offset so those stay in
+            # true sheet space.
+            if flip == "front-back":
+                back_img = back_img.transpose(Image.ROTATE_180)
 
             # Corner registration marks (after mask + labels so they aren't clipped)
             if reg_on:

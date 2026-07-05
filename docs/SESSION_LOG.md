@@ -410,3 +410,70 @@ with blank fill-in and a mechanism for users to fill gaps via multiple same-slot
   `_get_modules_to_process` and use `common/` output — no warning, by design.
 - `common/` bug pre-existed: previously `module_index=0` was passed for the common pass,
   accidentally including skyline col 0 in `common/`; fixed this session.
+
+## 2026-07-05 - flap_printer: correct front-back jig-flip geometry
+
+- **Model:** Claude Opus 4.8
+- **Commits:** none (uncommitted)
+- **Files touched:**
+  - `pvv_tools/flap_printer/renderer.py` (back-side jig-flip geometry)
+
+### Goal
+Fix the front-back flip mode so the back sheet registers correctly after the
+physical jig flip (notch/pins and artwork land on the correct side/orientation).
+A first attempt (per-image `FLIP_LEFT_RIGHT`) did not fix it.
+
+### Changes
+- Removed the speculative per-back-image `FLIP_LEFT_RIGHT` transform.
+- Replaced it with a single verified rule: a front-back flip is geometrically
+  `reflect_x == rotate180 ∘ reflect_y`, i.e. a left-right flip followed by an
+  in-plane 180° rotation. So the back sheet is now ALWAYS built with left-right
+  semantics (`reorder` with `"left-right"`, spool-at-top, mask spool-at-top), and
+  when the job is in `front-back` mode the fully-composed back image (art + mask +
+  labels) is rotated 180° via `Image.ROTATE_180` before registration marks and the
+  calibration offset (which stay in true sheet space).
+- Removed now-unused imports `FlapSide` and `apply_flip_transform` from renderer.
+
+### Notes / decisions
+- Verified empirically with an asymmetric "R" marker (red dot top-left, blue dot
+  bottom-right): rendered the same job in both modes, and confirmed pixel-identical
+  that `front-back back == ROTATE_180(left-right back)`. Front sheet and left-right
+  mode are byte-for-byte unchanged (no regression).
+- The ink-save mask notches are drawn symmetrically on both sides, so the notch
+  never "swaps" by itself; the real defect was that the back kept the spool at the
+  top (spool-at-bottom=False, correct only for left-right) instead of matching the
+  front's spool side after a front-back flip. The 180° rotation fixes both the
+  spool/pin side and the artwork orientation in one step.
+- Full `prototype_job.json` re-rendered clean (29 files, 22-cell preview).
+- Left this uncommitted per the session-logging rule (staging left to the user).
+
+## 2026-07-05 - flap_printer_jigs.scad: fix pvv_rounded_square reference + flip_mode default
+
+- **Model:** Claude Sonnet 4.6
+- **Commits:** none (uncommitted)
+- **Files touched:**
+  - `pvv_cad/flap_printer_jigs.scad` (fix unknown-module warning)
+  - `pvv_tools/flap_printer/config.py` (fix JSON parse default for flip_mode)
+  - `pvv_tools/README.md` (update flip_mode default + description)
+
+### Goal
+Fix OpenSCAD warning "Ignoring unknown module 'pvv_rounded_square'" on line 130 of
+`flap_printer_jigs.scad`, and fix a stale `flip_mode` default in the README and config.
+
+### Changes
+- `flap_printer_jigs.scad`: Both `pvv_rounded_square(..., cr=...)` calls changed to
+  `rounded_square(..., r=...)` from Scott's `3d/shapes.scad` (already imported). The
+  `pvv_rounded_square` module lives only in `PVV_splitflap_mods.scad` and was never
+  in `shapes.scad`; the `use<>` comment was wrong from the refactor.
+- `config.py`: `_get(j, 'flip_mode', 'left-right')` → `'front-back'` to match the
+  dataclass field default (which had been updated to `"front-back"` in a prior commit
+  but the JSON parser fallback was never synced).
+- `README.md`: `flip_mode` table row default updated to `"front-back"`; description
+  reworded to describe the physical jig motion rather than the image transform.
+
+### Notes / decisions
+- `pvv_rounded_square` vs `rounded_square`: both are geometrically equivalent for
+  all-4-corners rounding; Scott's version additionally supports a `corners=[]`
+  parameter for selective rounding (unused in jigs.scad).
+- `PVV_splitflap_mods.scad` has uncommitted top-level call changes
+  (`print_plate` / `motor_flange_alignment_jig` toggle) — working state, not staged.

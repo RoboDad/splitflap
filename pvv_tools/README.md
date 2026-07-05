@@ -100,7 +100,7 @@ See `example_job.json` for a complete example. The config has five sections:
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `type` | string | `"minibed"` | Jig type (currently only `"minibed"` supported) |
-| `flip_mode` | string | `"left-right"` | How back images are flipped: `"left-right"` (mirror horizontal) or `"front-back"` |
+| `flip_mode` | string | `"front-back"` | How the jig is physically flipped to load the back: `"front-back"` (pancake flip — rotate about long axis) or `"left-right"` (side flip — rotate about short axis) |
 | `output_orientation` | string | `"landscape"` | Output image orientation: `"landscape"` or `"portrait"` |
 | `num_flaps_x` | int | `1` | Number of flap columns in the jig insert |
 | `num_flaps_y` | int | `6` | Number of flap rows in the jig insert |
