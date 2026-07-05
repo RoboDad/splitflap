@@ -1,21 +1,20 @@
 {
   "display": {
-    "num_modules": 6,
+    "num_modules": 24,
     "module_pitch_mm": 64.0,
     "inter_module_gap_mm": 10.0
   },
   "preview": {
     "enabled": true,
-    "columns": 11,
+    "columns": 12,
     "dpi": 107,
     "flap_color": [0, 0, 0],
-    "label_color": [255, 255, 255],
     "background_color": [40, 40, 40],
     "inter_cell_gap_mm": 10
   },
   "jig": {
     "type": "minibed",
-    "flip_mode": "front-back",
+    "flip_mode": "left-right",
     "output_orientation": "landscape",
     "num_flaps_x": 1,
     "num_flaps_y": 6,
@@ -51,10 +50,8 @@
     {"slot":  6, "label": "PVV48", "type": "emoji", "name": "sob"},
     {"slot":  7, "label": "PVV49", "type": "emoji", "name": "kiss", "notch_mode": ["none", "inset"]},
     {"slot":  8, "label": "PVV50", "type": "emoji", "name": "heart_eyes"},
-    {"slot":  9, "label": "PVV51", "type": "single", "source": "assets/images/woodgathering.PNG", "notch_mode": "inset"},
-    {"slot": 10, "type": "multi-module", "label": "SKY (52)", "source": "test_images/skyline.png",  "module_range": [0, 5]},
-    {"slot": 11, "type": "multi-module", "label": "TRI (53)", "source": "assets/images/WideBunnyTruck.PNG", "fit_mode": "fit", "module_range": [1, 2]},
-    {"slot": 11, "type": "multi-module", "label": "TRI (53)", "source": "assets/images/WideMoth.PNG", "fit_mode": "stretch", "module_range": [3, 5]},
-    {"slot": 11, "type": "multi-module", "label": "TRI (53)", "source": "assets/images/FrogAndElf.PNG", "fit_mode": "fit", "module_range": [0, 0]}
+    {"slot":  9, "label": "PVV51", "type": "emoji", "name": "chicken", "offset_mm": [0, -6]},
+    {"slot": 10, "label": "PVV52", "type": "single", "source": "assets/images/woodgathering.PNG", "notch_mode": "inset"},
+    {"slot": 11, "label": "PVV53", "type": "single", "source": "test_images/placeholders/EP53.svg"}
   ]
 }

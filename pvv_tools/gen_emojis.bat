@@ -13,17 +13,19 @@ pushd "%~dp0\.."
 call .venv\Scripts\activate.bat
 chcp 65001 > nul
 
-python pvv_tools\download_emoji.py "❤️"  --name heart
-python pvv_tools\download_emoji.py "👋🏽"
-python pvv_tools\download_emoji.py "🐔" --name chicken
-python pvv_tools\download_emoji.py "😂" --name joy
-python pvv_tools\download_emoji.py "😭" --name sob
-python pvv_tools\download_emoji.py "🙏" --name pray
-python pvv_tools\download_emoji.py "🤣" --name rofl
-python pvv_tools\download_emoji.py "👍" --name thumbs_up
-python pvv_tools\download_emoji.py "😘" --name kiss
-python pvv_tools\download_emoji.py "😊" --name smile
-python pvv_tools\download_emoji.py "😍" --name heart_eyes
-python pvv_tools\download_emoji.py "🥰" --name smiling_face_with_hearts
+REM python pvv_tools\download_emoji.py "❤️"  --name heart
+REM python pvv_tools\download_emoji.py "👋🏽"
+REM python pvv_tools\download_emoji.py "🐔" --name chicken
+REM python pvv_tools\download_emoji.py "😂" --name joy
+REM python pvv_tools\download_emoji.py "😭" --name sob
+REM python pvv_tools\download_emoji.py "🙏" --name pray
+REM python pvv_tools\download_emoji.py "🤣" --name rofl
+REM python pvv_tools\download_emoji.py "👍" --name thumbs_up
+REM python pvv_tools\download_emoji.py "😘" --name kiss
+REM python pvv_tools\download_emoji.py "😊" --name smile
+REM python pvv_tools\download_emoji.py "😍" --name heart_eyes
+REM python pvv_tools\download_emoji.py "🥰" --name smiling_face_with_hearts
+REM python pvv_tools\download_emoji.py "😉" --name wink
+python pvv_tools\download_emoji.py "💀" --name skull
 
 popd

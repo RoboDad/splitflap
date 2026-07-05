@@ -308,3 +308,105 @@ independent notch control. Also housekeeping (gitignore, README audit).
   to keep the code clean; negligible extra time at 96 DPI.
 - `vscode_askQuestions` tool auto-dismissed in this session (known VS Code issue in
   agent mode); plain chat Q&A used instead.
+
+## 2026-07-04 - flap_printer: bleed refactor, preview clipping, per-flap bleed/offset
+
+- **Model:** Claude Sonnet 4.6
+- **Commits:** 74585db, 425f765, 3c5d0a0, fa94e31, 4df5933, 02f2cbc
+- **Files touched:**
+  - `pvv_tools/flap_printer/slicer.py` (`_flush_edges`, bleed expansion at fit time)
+  - `pvv_tools/flap_printer/renderer.py` (bleed threading, `_crop_to_pocket`, `_apply_offset`)
+  - `pvv_tools/flap_printer/layout.py` (`generate_batch_image` reads bleed from image size)
+  - `pvv_tools/flap_printer/previewer.py` (`_make_flap_mask`, flap-outline clipping)
+  - `pvv_tools/flap_printer/config.py` (`CustomFlap.bleed`, `CustomFlap.offset_mm`, `_parse_offset`)
+  - `pvv_tools/README.md` (Bleed Margin rewrite, Image Offset section, table rows)
+  - `pvv_tools/gen_emojis.bat` (`pushd`/`popd` fix)
+  - `pvv_tools/prototype_job.json` (working-state tests)
+  - `pvv_tools/assets/emoji/*.svg` (10 new emoji assets)
+
+### Goal
+Refactor the bleed pipeline to be per-edge and WYSIWYG; add per-flap `bleed` opt-out
+and `offset_mm` positioning; clip preview artwork to the physical flap outline;
+document new features.
+
+### Changes
+- **Bleed refactor**: Old code uniformly upscaled every image by 2×bleed in
+  `layout.py`. New: bleed expansion happens in `slicer.py` at fit time, per-edge,
+  only on flush edges (where image fills to the boundary). `layout.py` reads baked-in
+  bleed from image dimensions. Ink-save mask (`apply_ink_save_mask`) unchanged — still
+  always expands full bleed on all sides.
+- **WYSIWYG preview**: Preview render path now renders with bleed then crops back to
+  `flap_w × flap_h` via `_crop_to_pocket`, so the preview exactly matches the
+  in-pocket appearance.
+- **Preview outline clipping**: `previewer.py` gained `_make_flap_mask` (rounded
+  corners + notch cutouts); applied via `ImageChops.multiply` on artwork alpha so
+  artwork outside the flap shape is hidden in the contact-sheet preview.
+- **Per-flap `bleed` field**: `CustomFlap.bleed = True`; when `False`, skips
+  bleed edge-expansion for that image (ink-save mask still applies).
+- **Per-flap `offset_mm` field**: `[dx_mm, dy_mm]` shift applied to the full display
+  image after all fit/notch transforms, before slicing into top/bottom halves.
+  Positive X = right, positive Y = down.
+- **README**: Bleed Margin section fully rewritten with A/B split (ink-save vs fit
+  expansion), flush-edge table, and ASCII diagram. New `## Image Offset` section added.
+- `gen_emojis.bat`: replaced `cd /d` with `pushd`/`popd` to preserve CWD.
+- 10 new emoji SVGs added to `assets/emoji/`.
+
+### Notes / decisions
+- Flush-edge logic: `fill` = always flush; `fit` = AR-dependent (wider image → flush X);
+  `stretch` = always flush; `contain` = never flush. Notch sides suppress x-flush.
+- `calibration_offset_mm` (global canvas shift) vs `offset_mm` (per-image artwork
+  positioning) distinction documented in README.
+- Smoke test passed at each stage (`python -m pvv_tools.flap_printer prototype_job.json`).
+
+## 2026-07-04 - flap_printer: inter_cell_gap, AR tolerance fix, multi-module geometry + coverage
+
+- **Model:** Claude Sonnet 4.6
+- **Commits:** none (uncommitted)
+- **Files touched:**
+  - `pvv_tools/flap_printer/config.py` (`inter_cell_gap_mm` in `PreviewConfig`; bleed default by type)
+  - `pvv_tools/flap_printer/previewer.py` (border vs inter-cell gap separation; `max(0,...)` fix)
+  - `pvv_tools/flap_printer/slicer.py` (`_flush_edges` AR tolerance; `extract_module_column` offset bug fix)
+  - `pvv_tools/flap_printer/renderer.py` (slot-grouped resolution; multi-module blank fill; coverage warnings; common-pass fix)
+  - `pvv_tools/test_images/skyline.png` (regenerated with correct module guides)
+  - `pvv_tools/test_images/triptych.png` (regenerated with correct module guides)
+  - `pvv_tools/prototype_job.json` (multi-module test entries)
+
+### Goal
+Add `inter_cell_gap_mm` to preview config; fix bleed defaults for SVG-based types;
+fix `extract_module_column` geometry bug; add multi-module coverage gap detection
+with blank fill-in and a mechanism for users to fill gaps via multiple same-slot entries.
+
+### Changes
+- **`inter_cell_gap_mm`**: New `PreviewConfig` field; separate from `cell_padding_mm`
+  (outer border). `previewer.py` uses `max(0, ...)` floor so zero gap is valid.
+- **Bleed defaults by type**: `single`/`multi-module` default to `bleed=True`;
+  `glyph`/`epilogue`/`emoji`/`blank` default to `bleed=False`.  Explicit `"bleed"` in
+  JSON still overrides.
+- **`_flush_edges` AR tolerance**: Added `_AR_TOL = 1e-3`; exact-AR images now return
+  `(True, True)` so bleed expands on both axes instead of one.
+- **`extract_module_column` fix**: Removed erroneous `flap_left_in_module = (pitch-width)/2`
+  offset.  The composite canvas starts at the left edge of flap 0, not the pitch-slot
+  left, so `x_mm = offset * pitch` with no centering offset.
+- **Test images regenerated**: `skyline.png` (6-module, 3740×880) and `triptych.png`
+  (3-module, 1820×880) re-drawn with correct guide positions (`x = k × pitch`).
+- **Slot-grouped resolution** (`_group_flaps_by_slot`): Multiple JSON entries with the
+  same `slot` index are tried left-to-right per module; first entry whose `module_range`
+  covers the current module wins.  Allows partial-range fill entries (e.g. `"type": "blank",
+  "module_range": [0,2]`) alongside a full multi-module entry for a different sub-range.
+- **Blank fill for coverage gaps**: When a processed module has no coverage for a
+  multi-module slot, a transparent blank is output and `WARNING` is logged.
+- **Upfront coverage warning**: `render_job` now warns once per gap slot before rendering
+  begins: `Slot N ('label'): modules [x, y] have no coverage — will output blank flap(s)`.
+- **Common-pass fix**: `common/` output now uses `module_index=-1`, so multi-module
+  entries are correctly excluded from common batches.
+- **Preview blank cells**: `_collect_preview_entries` now shows blank cells for uncovered
+  modules in multi-module slots (preview grew from 19 → 22 cells for current test job).
+
+### Notes / decisions
+- Multiple same-slot entries are ordered by declaration; `module_range` is respected for
+  ALL types (not just `multi-module`), allowing `"type": "blank", "module_range": [0,2]`
+  as an explicit filler without shadowing adjacent ranges.
+- Modules outside ALL multi-module ranges (e.g. 6–23 in the test job) do not appear in
+  `_get_modules_to_process` and use `common/` output — no warning, by design.
+- `common/` bug pre-existed: previously `module_index=0` was passed for the common pass,
+  accidentally including skyline col 0 in `common/`; fixed this session.

@@ -44,6 +44,9 @@ pvv_tools/prototype_output/
 # Windows Explorer metadata
 desktop.ini
 
+# Personal images (not for public repo)
+pvv_tools/assets/images/
+
 # Large/binary placeholder test images
 *.heic
 *.HEIC
