@@ -39,7 +39,7 @@ class DisplayConfig:
 @dataclass
 class JigConfig:
     type: str = "minibed"
-    flip_mode: str = "left-right"       # "left-right" | "front-back"
+    flip_mode: str = "front-back"        # "left-right" | "front-back"
     output_orientation: str = "landscape"  # "landscape" | "portrait"
     # Grid parameters
     num_flaps_x: int = 1
@@ -110,6 +110,7 @@ class PreviewConfig:
     enabled: bool = False
     columns: int = 12
     cell_padding_mm: float = 3.0
+    inter_cell_gap_mm: Optional[float] = None  # gap between cells; defaults to cell_padding_mm
     flap_color: tuple = (20, 20, 20)           # RGB — physical flap stock colour
     background_color: tuple = (245, 245, 245)  # RGB — overall canvas background
     label_color: tuple = (60, 60, 60)          # RGB — label text colour
@@ -142,6 +143,7 @@ class CustomFlap:
     fit_mode: Optional[str] = None    # per-image override; None = use global default
     notch_mode: Optional[tuple[str, str]] = None  # (left, right); None = use global default
     bleed: bool = True   # False → skip bleed edge-expansion for this image (ink-save mask still applied)
+                         # Default: True for 'single'/'multi-module'; False for 'glyph'/'epilogue'/'emoji'/'blank'
     offset_mm: Optional[tuple[float, float]] = None  # [dx_mm, dy_mm] shift applied after fit, before slicing
     enabled: bool = True  # False → output is 100% transparent; slot position preserved
 
@@ -273,10 +275,12 @@ def _load_preview(raw: dict) -> PreviewConfig:
         val = pv.get(key)
         return _parse_rgb(val, f"preview.{key}") if val is not None else default
 
+    raw_gap = pv.get('inter_cell_gap_mm')
     return PreviewConfig(
         enabled=bool(_get(pv, 'enabled', False)),
         columns=int(_get(pv, 'columns', 12)),
         cell_padding_mm=float(_get(pv, 'cell_padding_mm', 3.0)),
+        inter_cell_gap_mm=float(raw_gap) if raw_gap is not None else None,
         flap_color=_opt_color('flap_color', (20, 20, 20)),
         background_color=_opt_color('background_color', (245, 245, 245)),
         label_color=_opt_color('label_color', (60, 60, 60)),
@@ -481,7 +485,7 @@ def load_config(path: str | Path) -> JobConfig:
             crop=tuple(crop) if crop else None,
             fit_mode=cf.get('fit_mode', None),
             notch_mode=_parse_notch_mode(cf['notch_mode'], f"custom_flaps[{i}].notch_mode") if cf.get('notch_mode') is not None else None,
-            bleed=bool(cf.get('bleed', True)),
+            bleed=bool(cf.get('bleed', cf.get('type', 'single') in ('single', 'multi-module'))),
             offset_mm=_parse_offset(cf['offset_mm'], f'custom_flaps[{i}].offset_mm') if cf.get('offset_mm') is not None else None,
             enabled=bool(cf.get('enabled', True)),
             source_path=source_path,

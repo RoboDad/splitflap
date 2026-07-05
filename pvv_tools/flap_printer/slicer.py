@@ -62,18 +62,20 @@ def extract_module_column(
     start_module = module_range[0]
     offset_modules = module_index - start_module
 
-    # Position of this module's flap within the wide image:
-    # Each module occupies module_pitch except the last (which is just module_width).
-    # Module N's left edge = N * module_pitch from the start of the range.
-    # The flap area is centred within the module pitch.
-    flap_left_in_module = (display.module_pitch - display.module_width) / 2.0
-    x_mm = offset_modules * display.module_pitch + flap_left_in_module
+    # The composite canvas spans exactly from the left edge of the first flap
+    # to the right edge of the last flap:
+    #   canvas_width = N * pitch - inter_module_gap
+    #                = N * (flap_width + inter_module_gap) - inter_module_gap
+    # Within that canvas, flap k starts at k * pitch (no centering offset):
+    #   flap 0 → [0, flap_width], flap 1 → [pitch, pitch + flap_width], …
+    x_mm = offset_modules * display.module_pitch
 
     x_px = mm_to_px(x_mm, dpi)
     w_px = mm_to_px(display.module_width, dpi)
 
     column = image.crop((x_px, 0, x_px + w_px, image.height))
     return column
+
 
 
 def apply_transforms(
@@ -130,8 +132,16 @@ def _flush_edges(
             return False, False
         img_ar = image_w / image_h
         tgt_ar = target_w / target_h
+        # Use a small relative tolerance so that images whose AR matches the
+        # target (e.g. 54:88 SVGs, or any image pre-sized to exact flap dims)
+        # are treated as filling both axes, not just one.  This matters because
+        # a physical print-alignment error could expose any of the four edges.
+        _AR_TOL = 1e-3
+        ar_match = abs(img_ar - tgt_ar) / max(tgt_ar, 1e-9) < _AR_TOL
+        if ar_match:
+            return True, True
         # width-constrained: image wider than target ratio → fills x, bars in y
-        if img_ar >= tgt_ar:
+        if img_ar > tgt_ar:
             return True, False
         else:
             return False, True

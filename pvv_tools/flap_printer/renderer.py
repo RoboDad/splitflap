@@ -9,6 +9,12 @@ from typing import Optional
 
 from PIL import Image
 
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    pass  # HEIC/HEIF support unavailable; install pillow-heif to enable it
+
 from .config import JobConfig, CustomFlap
 from .dimensions import AllDimensions, FlapDimensions, JigDimensions, DisplayDimensions, mm_to_px
 from .slicer import slice_display_image, extract_module_column, apply_transforms, fit_to_target, fit_with_notch_mode
@@ -17,6 +23,21 @@ from .labels import render_labels
 from . import svg_loader
 
 logger = logging.getLogger(__name__)
+
+
+def _group_flaps_by_slot(flaps: list[CustomFlap]) -> dict[int, list[CustomFlap]]:
+    """Group CustomFlap entries by slot, preserving declaration order within each group.
+
+    Multiple entries with the same slot index represent alternative coverage
+    for the same physical flap position (e.g. two multi-module ranges that
+    together span different module subsets).  The renderer resolves them
+    left-to-right: the first entry whose module_range covers the current
+    module wins.
+    """
+    groups: dict[int, list[CustomFlap]] = {}
+    for cf in flaps:
+        groups.setdefault(cf.slot, []).append(cf)
+    return groups
 
 
 def _apply_calibration_offset(img: Image.Image, dx_px: int, dy_px: int) -> Image.Image:
@@ -105,6 +126,9 @@ def _render_custom_flap_images(
     if cf.type == "multi-module":
         if cf.module_range is None:
             return None
+        if module_index < 0:
+            # Common/sentinel pass — multi-module content is module-specific; skip.
+            return None
         start_mod, end_mod = cf.module_range
         if not (start_mod <= module_index <= end_mod):
             return None
@@ -141,14 +165,58 @@ def _resolve_flaps_for_module(
 ) -> list[tuple[Image.Image, Image.Image, str]]:
     """Resolve and slice all custom flap images for a given module.
 
-    Returns a list of (top_half, bottom_half, label) tuples, one per
-    custom flap slot that has content for this module.
+    Returns a list of (top_half, bottom_half, label) tuples, one per slot
+    that has content for this module.
+
+    Multiple entries with the same slot are tried in declaration order;
+    the first entry whose module_range covers *module_index* wins.
+    module_range is respected for all entry types, not just multi-module:
+    this allows a ``{"type": "blank", "module_range": [0, 2]}`` entry to
+    fill in a partial range without overriding adjacent ranges in the same
+    slot.
+
+    When module_index >= 0 (a real module pass, not the common/sentinel pass)
+    and a slot has at least one multi-module entry but none of them cover
+    *module_index*, a blank is inserted and a warning is logged.
     """
+    flap_w = mm_to_px(dims.flap.width, dpi)
+    flap_h = mm_to_px(dims.flap.height, dpi)
+    blank = Image.new('RGBA', (flap_w, flap_h), (0, 0, 0, 0))
+
+    slot_groups = _group_flaps_by_slot(config.custom_flaps)
     results = []
-    for cf in config.custom_flaps:
-        pair = _render_custom_flap_images(cf, config, module_index, dims, dpi, bleed_px)
+
+    for slot in sorted(slot_groups.keys()):
+        entries = slot_groups[slot]
+        pair = None
+        winning_label = None
+
+        for cf in entries:
+            # Respect module_range for all types: if an entry explicitly declares
+            # a range, skip it when the current module is outside that range.
+            if cf.module_range is not None and module_index >= 0:
+                start, end = cf.module_range
+                if not (start <= module_index <= end):
+                    continue
+            candidate = _render_custom_flap_images(cf, config, module_index, dims, dpi, bleed_px)
+            if candidate is not None:
+                pair = candidate
+                winning_label = cf.label
+                break
+
+        if pair is None:
+            has_multimodule = any(e.type == 'multi-module' for e in entries)
+            if has_multimodule and module_index >= 0:
+                # All entries for this multi-module slot lack coverage here —
+                # insert a blank.  (Upfront warning already logged by render_job.)
+                pair = (blank.copy(), blank.copy())
+                winning_label = f"{entries[0].label}-blank"
+            # else: non-multi-module slot that skipped all entries (shouldn't
+            # normally happen); omit silently to preserve prior behaviour.
+
         if pair is not None:
-            results.append((*pair, cf.label))
+            results.append((*pair, winning_label))
+
     return results
 
 
@@ -180,38 +248,62 @@ def _collect_preview_entries(
     dims: AllDimensions,
     dpi: float,
 ) -> list[tuple[Image.Image, Image.Image, str]]:
-    """Collect (top_half, bottom_half, label) for every unique displayable slot.
+    """Collect (top_half, bottom_half, label) for every displayable slot × module.
 
     Images are rendered with bleed and then cropped to the physical pocket
-    area, so the preview is WYSIWYG: it shows exactly the content that will
-    be visible on the physical flap after cutting.
+    area, so the preview is WYSIWYG.
 
-    Single / glyph / emoji / blank flaps appear once.
-    Multi-module flaps appear once per module in their range.
-    Labels include both the flap label and the slot index (user preference).
+    Slot grouping rules:
+    - Non-multi-module slots appear once (first entry in the group).
+    - Multi-module slot groups enumerate every module that is processed for
+      the job (from ``_get_modules_to_process``).  Modules that have no
+      coverage within that slot group are shown as a labelled blank so the
+      user can see the gap.
     """
     flap_w = mm_to_px(dims.flap.width, dpi)
     flap_h = mm_to_px(dims.flap.height, dpi)
     bleed_px = mm_to_px(config.output.bleed_mm, dpi)
+    blank = Image.new('RGBA', (flap_w, flap_h), (0, 0, 0, 0))
 
+    # Modules that will be rendered (>= 0 only; -1 sentinel excluded)
+    processed_modules = sorted(m for m in _get_modules_to_process(config, None) if m >= 0)
+
+    slot_groups = _group_flaps_by_slot(config.custom_flaps)
     entries = []
-    for cf in config.custom_flaps:
-        if cf.type == "multi-module" and cf.module_range:
-            start, end = cf.module_range
-            for m in range(start, end + 1):
-                pair = _render_custom_flap_images(cf, config, m, dims, dpi, bleed_px)
-                if pair is not None:
-                    top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True)
-                    bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False)
-                    label = f"{cf.label} M{m} · #{cf.slot}"
-                    entries.append((top, bottom, label))
+
+    for slot in sorted(slot_groups.keys()):
+        slot_entries = slot_groups[slot]
+        has_multimodule = any(e.type == 'multi-module' for e in slot_entries)
+
+        if has_multimodule:
+            for m in processed_modules:
+                pair = None
+                winning_label = None
+                for cf in slot_entries:
+                    if cf.module_range is not None:
+                        start, end = cf.module_range
+                        if not (start <= m <= end):
+                            continue
+                    candidate = _render_custom_flap_images(cf, config, m, dims, dpi, bleed_px)
+                    if candidate is not None:
+                        pair = candidate
+                        winning_label = f"{cf.label} M{m} · #{slot}"
+                        break
+                if pair is None:
+                    pair = (blank.copy(), blank.copy())
+                    winning_label = f"BLANK M{m} · #{slot}"
+                top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True)
+                bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False)
+                entries.append((top, bottom, winning_label))
         else:
-            pair = _render_custom_flap_images(cf, config, 0, dims, dpi, bleed_px)
+            # Non-multi-module slot: use first entry, render module-agnostic
+            cf = slot_entries[0]
+            pair = _render_custom_flap_images(cf, config, -1, dims, dpi, bleed_px)
             if pair is not None:
                 top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True)
                 bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False)
-                label = f"{cf.label} · #{cf.slot}"
-                entries.append((top, bottom, label))
+                entries.append((top, bottom, f"{cf.label} · #{slot}"))
+
     return entries
 
 
@@ -261,11 +353,34 @@ def render_job(
     generated: list[Path] = []
     bleed_px = mm_to_px(config.output.bleed_mm, dpi)
 
+    # Warn upfront about multi-module slots that have coverage gaps for the
+    # modules this job will process.
+    slot_groups = _group_flaps_by_slot(config.custom_flaps)
+    processed_module_set = {m for m in modules if m >= 0}
+    for slot, entries in sorted(slot_groups.items()):
+        if not any(e.type == 'multi-module' for e in entries):
+            continue
+        uncovered = []
+        for m in sorted(processed_module_set):
+            covered = any(
+                e.type == 'multi-module' and e.module_range is not None
+                and e.module_range[0] <= m <= e.module_range[1]
+                for e in entries
+            )
+            if not covered:
+                uncovered.append(m)
+        if uncovered:
+            logger.warning(
+                "Slot %d ('%s'): modules %s have no coverage — will output blank flap(s)",
+                slot, entries[0].label, uncovered,
+            )
+
     for mod_idx in modules:
         if mod_idx == -1:
             mod_label = "common"
-            # For common/single flaps, process without module context
-            flap_data = _resolve_flaps_for_module(config, 0, dims, dpi, bleed_px)
+            # Pass module_index=-1 so multi-module entries are skipped;
+            # common/ contains only module-agnostic (single/glyph/blank) content.
+            flap_data = _resolve_flaps_for_module(config, -1, dims, dpi, bleed_px)
         else:
             mod_label = f"module_{mod_idx:02d}"
             flap_data = _resolve_flaps_for_module(config, mod_idx, dims, dpi, bleed_px)

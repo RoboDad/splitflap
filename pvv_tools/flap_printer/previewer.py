@@ -215,7 +215,9 @@ def generate_preview(
 
     pv = config.preview
     preview_dpi = float(pv.dpi)
-    padding_px = max(2, mm_to_px(pv.cell_padding_mm, preview_dpi))
+    border_px = max(2, mm_to_px(pv.cell_padding_mm, preview_dpi))
+    gap_mm = pv.inter_cell_gap_mm if pv.inter_cell_gap_mm is not None else pv.cell_padding_mm
+    gap_px = max(0, mm_to_px(gap_mm, preview_dpi))
 
     flap_color = tuple(int(c) for c in pv.flap_color)
     bg_color = tuple(int(c) for c in pv.background_color)
@@ -233,15 +235,15 @@ def generate_preview(
     rows = math.ceil(n / cols)
     cell_w, cell_h = cells[0].size
 
-    canvas_w = cols * cell_w + (cols + 1) * padding_px
-    canvas_h = rows * cell_h + (rows + 1) * padding_px
+    canvas_w = cols * cell_w + (cols - 1) * gap_px + 2 * border_px
+    canvas_h = rows * cell_h + (rows - 1) * gap_px + 2 * border_px
     canvas = Image.new('RGB', (canvas_w, canvas_h), bg_color)
 
     for i, cell in enumerate(cells):
         row_i = i // cols
         col_i = i % cols
-        px = padding_px + col_i * (cell_w + padding_px)
-        py = padding_px + row_i * (cell_h + padding_px)
+        px = border_px + col_i * (cell_w + gap_px)
+        py = border_px + row_i * (cell_h + gap_px)
         canvas.paste(cell.convert('RGB'), (px, py), cell)
 
     out_dir.mkdir(parents=True, exist_ok=True)
