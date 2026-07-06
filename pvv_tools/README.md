@@ -97,27 +97,35 @@ See `example_job.json` for a complete example. The config has five sections:
 
 ### `jig` — Print jig settings
 
+All jig coordinates are in **printer orientation** — exactly as the jig sits
+on the eufyMake E1 Mini Flatbed, viewed from above.  The mat's long axis runs
+along X (left/right), and the mat zero-point corner (the one with the
+diagonal corner cut) is at the bottom-right.  The OpenSCAD model
+(`pvv_cad/flap_printer_jigs.scad`), the output print images, and the physical
+flatbed all share this one frame.  Flap pockets sit rotated 90° in the jig —
+spool/notch edge facing right, toward the zero point — in a single row along
+X, so a pocket's X extent is `flap_height` and its Y extent is `flap_width`.
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `type` | string | `"minibed"` | Jig type (currently only `"minibed"` supported) |
-| `flip_mode` | string | `"front-back"` | How the jig is physically flipped to load the back: `"front-back"` (pancake flip — rotate about long axis) or `"left-right"` (side flip — rotate about short axis) |
-| `output_orientation` | string | `"landscape"` | Output image orientation: `"landscape"` or `"portrait"` |
-| `num_flaps_x` | int | `1` | Number of flap columns in the jig insert |
-| `num_flaps_y` | int | `6` | Number of flap rows in the jig insert |
+| `flip_mode` | string | `"front-back"` | How the jig is physically flipped to load the back: `"front-back"` (pancake flip — rotate about the long X axis) or `"left-right"` (side flip — rotate about the short Y axis) |
+| `num_flaps_x` | int | `6` | Number of flap pocket columns in the jig insert (along the long X axis) |
+| `num_flaps_y` | int | `1` | Number of flap pocket rows in the jig insert |
 | `gap_x_mm` | float | `6.0` | Horizontal gap between flap pockets (mm) |
 | `gap_y_mm` | float | `6.0` | Vertical gap between flap pockets (mm) |
 | `margin_x_mm` | float | `6.0` | Horizontal margin around the pocket grid inside the insert (mm) |
 | `margin_y_mm` | float | `6.0` | Vertical margin around the pocket grid inside the insert (mm) |
-| `printable_size_x_mm` | float | `88.0` | Width of the printer's printable area (mm). Used as the default canvas width and to anchor insert position. |
-| `printable_size_y_mm` | float | `333.0` | Height of the printer's printable area (mm). Used as the default canvas height. |
-| `printable_origin_x_mm` | float | `5.0` | X position of printable area's lower-left corner in mat absolute coordinates (mm) |
-| `printable_origin_y_mm` | float | `33.0` | Y position of printable area's lower-left corner in mat absolute coordinates (mm) |
-| `insert_origin_x_mm` | float | `16.0` | X position of insert's lower-left corner in mat absolute coordinates (mm) |
-| `insert_origin_y_mm` | float | `49.5` | Y position of insert's lower-left corner in mat absolute coordinates (mm) |
+| `printable_size_x_mm` | float | `333.0` | Width of the printer's printable area along the long X axis (mm). Used as the default canvas width and to anchor insert position. |
+| `printable_size_y_mm` | float | `88.0` | Depth of the printer's printable area along the short Y axis (mm). Used as the default canvas height. |
+| `printable_origin_x_mm` | float | `4.0` | X position of printable area's lower-left corner in mat absolute coordinates (mm) |
+| `printable_origin_y_mm` | float | `5.0` | Y position of printable area's lower-left corner in mat absolute coordinates (mm) |
+| `insert_origin_x_mm` | float | `20.5` | X position of insert's lower-left corner in mat absolute coordinates (mm) |
+| `insert_origin_y_mm` | float | `16.0` | Y position of insert's lower-left corner in mat absolute coordinates (mm) |
 | `laser_kerf_mm` | float | `0.04` | Inward offset applied to each flap pocket when cutting the insert (tightens fit) |
 | `insert_kerf_mm` | float | `0.04` | Outward offset applied to the insert outline when cutting the outer jig (compensates laser kerf) |
-| `mat_size_x_mm` | float | `97.0` | eufyMake minibed mat outer width (mm) — hardware constant, rarely changed |
-| `mat_size_y_mm` | float | `370.0` | eufyMake minibed mat outer height (mm) — hardware constant, rarely changed |
+| `mat_size_x_mm` | float | `370.0` | eufyMake minibed mat outer length along X (mm) — hardware constant, rarely changed |
+| `mat_size_y_mm` | float | `97.0` | eufyMake minibed mat outer depth along Y (mm) — hardware constant, rarely changed |
 | `mat_corner_radius_mm` | float | `7.5` | Mat outer corner radius (mm) |
 | `mat_corner_cut_mm` | float | `22.0` | Mat diagonal corner cut length (mm) at the mat origin corner |
 | `reg_mark_size_mm` | float | `6.0` | L-shaped registration mark arm length (mm) — written to `flap_printer_params.scad` for use by the laser-cut outer jig |
@@ -138,10 +146,10 @@ See `example_job.json` for a complete example. The config has five sections:
 | `labels` | bool | `true` | Render EP slot labels in the gap areas |
 | `label_font_size_pt` | int | `6` | Label font size in points |
 | `output_dir` | string | `"output"` | Output directory (relative paths are resolved against the job file's directory, not CWD) |
-| `canvas_size_mm` | `[w, h]` | _unset_ | Optional output image canvas size in mm. When set, the rendered image is sized to these dimensions without changing physical jig geometry. The canvas top-left aligns with the printable-area origin, so the insert and all flap positions stay fixed; only the surrounding image area grows or shrinks. Omit to use the jig section's `printable_size_x/y_mm` (default 88 × 333 mm, matches eufyMake **Zero Point** alignment mode). See note below on eufyMake alignment modes. |
+| `canvas_size_mm` | `[w, h]` | _unset_ | Optional output image canvas size in mm. When set, the rendered image is sized to these dimensions without changing physical jig geometry. The insert stays anchored to the image's left and bottom edges (extra canvas area is added at the top and right), so all flap positions keep their calibrated placement. Omit to use the jig section's `printable_size_x/y_mm` (default 333 × 88 mm, matches eufyMake **Zero Point** alignment mode). See note below on eufyMake alignment modes. |
 | `registration_marks` | bool | `false` | Draw 5 mm L-shaped registration marks in the 4 corners of the output image to aid alignment debugging. The bottom-right mark is rendered green to indicate the eufyMake Zero-Point origin; the other three are white. |
 | `registration_mark_line_width_mm` | float | `1.0` | Line width (mm) of the registration mark arms. Marks thinner than ~0.5 mm tend not to print reliably on the eufyMake. |
-| `calibration_offset_mm` | `[dx, dy]` | `[0, 0]` | Global mat-calibration offset (mm) applied to every drawn element in the final output image (flap art, ink-save mask, labels, and registration marks all shift together). Use this to compensate for a systematic offset between the printer's zero-point and the physical jig (e.g. eufyMake Zero-Point calibration being off by a couple of mm). Positive `dx` shifts content toward +X in the output image (in landscape orientation this is the long axis); positive `dy` shifts toward +Y. Content shifted past the image edge is clipped. |
+| `calibration_offset_mm` | `[dx, dy]` | `[0, 0]` | Global mat-calibration offset (mm) applied to every drawn element in the final output image (flap art, ink-save mask, labels, and registration marks all shift together). Use this to compensate for a systematic offset between the printer's zero-point and the physical jig (e.g. eufyMake Zero-Point calibration being off by a couple of mm). Positive `dx` shifts content toward +X (along the long axis, away from the zero point); positive `dy` shifts toward +Y (downward in the image). Content shifted past the image edge is clipped. |
 
 > **eufyMake alignment modes & canvas size.** The eufyMake Studio app has two
 > alignment modes with *different* working canvas sizes:
@@ -151,12 +159,12 @@ See `example_job.json` for a complete example. The config has five sections:
 > | **Camera** | 335 × 90 mm | Camera-detected mat position |
 > | **Zero Point** | 333 × 88 mm | Mat zero-point (lower-right corner of imported image) |
 >
-> The SCAD `minibed_printable_size_*` constants (88 × 333) match **Zero Point**
+> The jig `printable_size_*` constants (333 × 88) match **Zero Point**
 > mode exactly, so the default (no `canvas_size_mm` override) is correct when
 > using the alignment jig in Zero Point mode. Importing a 335 × 90 image into
 > Zero Point mode will appear ≈2 mm offset because the origin reference doesn't
 > match the image canvas. If you intend to use Camera mode, set
-> `canvas_size_mm: [90, 335]`.
+> `canvas_size_mm: [335, 90]`.
 
 ### `preview` — Module preview contact sheet
 
@@ -554,10 +562,10 @@ All fields are optional. Omit the entire section to rely solely on OpenSCAD + ha
 | Flap size | 54 × 43 mm |
 | Flap gap | 2.0 mm |
 | Display char height | 88.0 mm |
-| Printable area (minibed) | 88 × 333 mm |
-| Jig insert | 66 × 300 mm (centered in printable area) |
-| Insert offset | 11 × 16.5 mm |
-| Flaps per batch | 6 (1 col × 6 rows) |
+| Printable area (minibed) | 333 × 88 mm |
+| Jig insert | 300 × 66 mm (centered in printable area) |
+| Insert offset | 16.5 × 11 mm |
+| Flaps per batch | 6 (6 cols × 1 row) |
 | Default DPI | 360 |
 
 ## Output
@@ -576,9 +584,10 @@ output/
     └── batch_01_back.png
 ```
 
-Output images are sized to the full printable area (330 × 88 mm in landscape)
-with the jig insert content centered at the computed offset, surrounded by
-transparent pixels. This enables **Zero Point Alignment** in eufymake studio.
+Output images are sized to the full printable area (333 × 88 mm, in the same
+printer orientation as the jig) with the jig insert content centered at the
+computed offset, surrounded by transparent pixels. This enables **Zero Point
+Alignment** in eufymake studio.
 
 PNGs include DPI metadata so image editors show correct physical size.
 
@@ -655,13 +664,14 @@ pvv_tools/
    front is `top(K)`, its back is `bottom(K+1)`; the last back is blank.
 5. **Batch grouping** + **layout** (`layout.generate_batch_image`):
    slots are grouped into jig-sized batches (`jig_num_x * jig_num_y`).
-   Each slot's flap image is pasted onto a transparent
-   `printable_width x printable_height` canvas.  The paste position is
-   offset by the image's bleed amount (derived from `image.size` vs
-   pocket size) so the pocket area aligns with its grid coordinates and
-   bleed content extends beyond. Front batches offset upward (outer display
-   edge), back batches offset downward.
-6. **Jig flip** (`layout.apply_flip_transform` / `reorder_for_jig_flip`):
+   Each slot's upright flap image is rotated 90° CCW (pockets sit rotated
+   in the jig: top edge → left, spool edge → right) and pasted onto a
+   transparent `printable_width x printable_height` canvas.  The paste
+   position is offset by the image's bleed amount (derived from
+   `image.size` vs pocket size) so the pocket area aligns with its grid
+   coordinates and bleed content extends beyond. Front batches offset
+   leftward (outer display edge), back batches offset rightward.
+6. **Jig flip** (`layout.reorder_for_jig_flip`):
    When the operator flips the laser-cut jig (left-right or front-back)
    to print the back side, the flaps remain physically in place but their
    grid coordinates change. This step reorders only the *grid mapping*

@@ -335,7 +335,6 @@ def render_job(
     enable_mask: Optional[bool] = None,
     enable_registration_marks: Optional[bool] = None,
     flip_mode: Optional[str] = None,
-    orientation: Optional[str] = None,
 ) -> list[Path]:
     """Main render pipeline: process all modules and write batch images.
 
@@ -347,7 +346,6 @@ def render_job(
     mask_on = enable_mask if enable_mask is not None else config.output.ink_save_mask
     reg_on = enable_registration_marks if enable_registration_marks is not None else config.output.registration_marks
     flip = flip_mode or config.jig.flip_mode
-    orient = orientation or config.jig.output_orientation
 
     modules = _get_modules_to_process(config, module_filter)
     generated: list[Path] = []
@@ -423,27 +421,27 @@ def render_job(
             back_build_flip = "left-right"
 
             # Generate front image
-            front_img = generate_batch_image(front_batch, dims.flap, dims.jig, dims.printable, dpi, orient,
+            front_img = generate_batch_image(front_batch, dims.flap, dims.jig, dims.printable, dpi,
                                              spool_at_bottom=True)
 
             # Reorder back-side flaps to their post-jig-flip grid positions.
-            reordered_back = reorder_for_jig_flip(back_batch, dims.jig, back_build_flip, orient)
-            back_img = generate_batch_image(reordered_back, dims.flap, dims.jig, dims.printable, dpi, orient,
+            reordered_back = reorder_for_jig_flip(back_batch, dims.jig, back_build_flip)
+            back_img = generate_batch_image(reordered_back, dims.flap, dims.jig, dims.printable, dpi,
                                             spool_at_bottom=False)
 
             # Apply ink-saving mask
             if mask_on:
                 front_img = apply_ink_save_mask(front_img, dims.flap, dims.jig, dims.printable, dpi,
-                                                config.output.bleed_mm, orient, spool_at_bottom=True)
+                                                config.output.bleed_mm, spool_at_bottom=True)
                 back_img = apply_ink_save_mask(back_img, dims.flap, dims.jig, dims.printable, dpi,
-                                               config.output.bleed_mm, orient, spool_at_bottom=False)
+                                               config.output.bleed_mm, spool_at_bottom=False)
 
             # Add labels
             if labels_on:
                 front_img = render_labels(front_img, front_batch, dims.flap, dims.jig, dims.printable, dpi,
-                                          config.output.label_font_size_pt, orient)
+                                          config.output.label_font_size_pt)
                 back_img = render_labels(back_img, reordered_back, dims.flap, dims.jig, dims.printable, dpi,
-                                         config.output.label_font_size_pt, orient)
+                                         config.output.label_font_size_pt)
 
             # Front-back flip == left-right flip + 180° in-plane rotation.
             # Rotate the fully-composed (art + mask + labels) back sheet 180°
@@ -478,14 +476,10 @@ def render_job(
             # target mm dimensions instead of off-by-pixel-rounding values
             # (e.g. 90 mm @ 360 DPI → 1276 px, which naively reads back as
             # 90.022 mm).  Per-axis because the actual pixel rounding can
-            # differ on each axis.  Orientation may swap width/height.
+            # differ on each axis.
             img_w_px, img_h_px = front_img.size
-            if orient == "landscape":
-                target_mm_w, target_mm_h = dims.printable.height, dims.printable.width
-            else:
-                target_mm_w, target_mm_h = dims.printable.width, dims.printable.height
-            eff_dpi_x = img_w_px * 25.4 / target_mm_w
-            eff_dpi_y = img_h_px * 25.4 / target_mm_h
+            eff_dpi_x = img_w_px * 25.4 / dims.printable.width
+            eff_dpi_y = img_h_px * 25.4 / dims.printable.height
             dpi_info = (eff_dpi_x, eff_dpi_y)
 
             # Save

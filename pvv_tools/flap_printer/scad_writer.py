@@ -32,9 +32,11 @@ def write_flap_printer_params(
     j = jig_config
     p = dims.printable
 
-    # Derived jig values (mirrors JigDimensions.insert_size() formula)
-    space_x = f.width + j.gap_x_mm
-    space_y = f.height + j.gap_y_mm
+    # Derived jig values (mirrors JigDimensions.insert_size() formula).
+    # Flaps sit rotated 90° in the jig: each pocket's X extent is flap_height
+    # and its Y extent is flap_width (see the orientation note below).
+    space_x = f.height + j.gap_x_mm
+    space_y = f.width + j.gap_y_mm
     insert_size_x = space_x * j.num_flaps_x - j.gap_x_mm + 2 * j.margin_x_mm
     insert_size_y = space_y * j.num_flaps_y - j.gap_y_mm + 2 * j.margin_y_mm
 
@@ -46,6 +48,12 @@ def write_flap_printer_params(
         "// DO NOT EDIT MANUALLY.\n"
         "// Edit the 'jig' section in the job JSON file instead,\n"
         "// then run: python -m pvv_tools.flap_printer <job.json>\n"
+        "//\n"
+        "// Coordinates are in printer orientation (matching the physical jig\n"
+        "// on the eufyMake E1 Mini Flatbed viewed from above): the mat's long\n"
+        "// axis runs along X; the zero-point / corner-cut corner is at the\n"
+        "// bottom-right.  Flap pockets sit rotated 90° (spool edge facing\n"
+        "// right), in a single row along X.\n"
         "// ==============================================================\n"
         "\n"
         "// ---- Flap physical dimensions (read from PVV_splitflap_mods.scad by Python) ----\n"
@@ -71,7 +79,7 @@ def write_flap_printer_params(
         "// ---- Registration mark geometry ----\n"
         f"minibed_reg_mark_size = {j.reg_mark_size_mm};\n"
         f"minibed_reg_mark_stroke = {j.reg_mark_stroke_mm};\n"
-        f"minibed_reg_mark_extent_y = {j.printable_size_y_mm};  // same as printable_size_y\n"
+        f"minibed_reg_mark_extent_x = {j.printable_size_x_mm};  // same as printable_size_x\n"
         "\n"
         "// ---- Jig grid parameters ----\n"
         f"minibed_flap_jig_num_flaps_x = {j.num_flaps_x};\n"
@@ -84,8 +92,9 @@ def write_flap_printer_params(
         f"minibed_flap_jig_margin_y = {j.margin_y_mm};\n"
         "\n"
         "// ---- Derived jig dimensions (computed by Python from the parameters above) ----\n"
-        f"minibed_flap_jig_space_x = {space_x:.6g};    // flap_width({f.width}) + gap_x({j.gap_x_mm})\n"
-        f"minibed_flap_jig_space_y = {space_y:.6g};    // flap_height({f.height}) + gap_y({j.gap_y_mm})\n"
+        "// Pockets are rotated 90°: X extent = flap_height, Y extent = flap_width.\n"
+        f"minibed_flap_jig_space_x = {space_x:.6g};    // flap_height({f.height}) + gap_x({j.gap_x_mm})\n"
+        f"minibed_flap_jig_space_y = {space_y:.6g};    // flap_width({f.width}) + gap_y({j.gap_y_mm})\n"
         f"minibed_flap_jig_insert_size_x = {insert_size_x:.6g};   // space_x*num_x - gap_x + 2*margin_x\n"
         f"minibed_flap_jig_insert_size_y = {insert_size_y:.6g};   // space_y*num_y - gap_y + 2*margin_y\n"
         "\n"

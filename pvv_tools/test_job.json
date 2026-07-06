@@ -6,8 +6,7 @@
   },
   "jig": {
     "type": "minibed",
-    "flip_mode": "left-right",
-    "output_orientation": "landscape"
+    "flip_mode": "left-right"
   },
   "output": {
     "dpi": 360,

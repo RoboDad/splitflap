@@ -16,22 +16,17 @@ def render_labels(
     printable: PrintableAreaDimensions,
     dpi: float,
     font_size_pt: int = 6,
-    orientation: str = "landscape",
-    flip_mode: str | None = None,
 ) -> Image.Image:
     """Draw EP labels in the margin/gap areas of a batch image.
 
-    Labels are drawn in portrait orientation (matching jig SCAD coords),
-    then the image is rotated to match the requested orientation.
-
-    When *flip_mode* is set (for back-side images), labels are drawn at the
-    post-flip grid positions so they align with the flipped image content.
+    The batch image is in the sheet frame (flaps rotated 90°), so the sheet
+    is temporarily rotated into the upright frame, labels are drawn with
+    upright text next to each flap, and the sheet is rotated back.  On the
+    printed sheet the labels therefore read in the same direction as the
+    flap content.
     """
-    # Work in portrait orientation for positioning
-    if orientation == "landscape":
-        work = image.transpose(Image.ROTATE_270)
-    else:
-        work = image.copy()
+    # Rotate the sheet into the upright frame for text drawing
+    work = image.transpose(Image.ROTATE_270)
 
     draw = ImageDraw.Draw(work)
 
@@ -43,12 +38,17 @@ def render_labels(
     except (OSError, IOError):
         font = ImageFont.load_default()
 
-    margin_x_px = mm_to_px(jig.margin_x, dpi)
-    margin_y_px = mm_to_px(jig.margin_y, dpi)
+    # Pocket grid in sheet-frame pixels (pockets are rotated 90°:
+    # X extent = flap.height, Y extent = flap.width)
     insert_x_px = mm_to_px(printable.insert_offset_x, dpi)
     insert_y_px = mm_to_px(printable.insert_offset_y, dpi)
-    space_y_px = mm_to_px(flap.height + jig.gap_y, dpi)
+    margin_x_px = mm_to_px(jig.margin_x, dpi)
+    margin_y_px = mm_to_px(jig.margin_y, dpi)
+    space_x_px = mm_to_px(flap.height + jig.gap_x, dpi)
+    space_y_px = mm_to_px(flap.width + jig.gap_y, dpi)
+    flap_w_px = mm_to_px(flap.width, dpi)
     flap_h_px = mm_to_px(flap.height, dpi)
+    sheet_h_px = image.height  # = work.width
 
     label_color = (200, 200, 200, 255)  # light grey, visible on transparent bg
 
@@ -56,24 +56,21 @@ def render_labels(
         if not fs.label:
             continue
 
-        # Compute the original (pre-flip) grid cell for item i
         col = i % jig.num_x
         row = i // jig.num_x
 
-        # When a flip has been applied to the canvas, remap to the
-        # post-flip grid position so the label lands on the correct image.
-        if flip_mode is not None:
-            if (flip_mode == "left-right" and orientation == "landscape") or \
-               (flip_mode == "front-back" and orientation == "portrait"):
-                row = jig.num_y - 1 - row
-            elif (flip_mode == "left-right" and orientation == "portrait") or \
-                 (flip_mode == "front-back" and orientation == "landscape"):
-                col = jig.num_x - 1 - col
+        # Pocket top-left in sheet-frame pixels
+        pocket_x_s = insert_x_px + margin_x_px + col * space_x_px
+        pocket_y_s = insert_y_px + margin_y_px + row * space_y_px
 
-        y_flap_bottom = insert_y_px + margin_y_px + row * space_y_px + flap_h_px
-        # Label in the gap below the flap
-        label_x = insert_x_px + margin_x_px + 2
-        label_y = y_flap_bottom + 1
+        # Map into the upright work frame (work = ROTATE_270(sheet)):
+        # the pocket appears upright with its top-left at (work_x, work_y).
+        work_x = sheet_h_px - pocket_y_s - flap_w_px
+        work_y = pocket_x_s
+
+        # Label in the gap below the upright flap
+        label_x = work_x + 2
+        label_y = work_y + flap_h_px + 1
 
         draw.text((label_x, label_y), fs.label, fill=label_color, font=font)
 
@@ -85,8 +82,5 @@ def render_labels(
                   fill=(150, 150, 255, 255) if fs.side == "front" else (255, 150, 150, 255),
                   font=font)
 
-    # Rotate back if needed
-    if orientation == "landscape":
-        work = work.transpose(Image.ROTATE_90)
-
-    return work
+    # Rotate back into the sheet frame
+    return work.transpose(Image.ROTATE_90)

@@ -90,19 +90,17 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     # Apply output.canvas_size_mm override (e.g. match eufyMake Studio's
-    # mat canvas: [90, 335]).  The canvas top-left sits at the same mat
-    # zero-point origin as the physical printable area, so the insert's
-    # offset within the canvas is identical to its offset within the
-    # printable area — only the canvas dimensions change.  This grows the
-    # output image to match the eufyMake working canvas without shifting
-    # any flap content.
+    # Camera-mode mat canvas: [335, 90]).  The insert stays anchored to the
+    # image's left and bottom edges — extra canvas size is added at the top
+    # and right — so flap content keeps its calibrated physical placement
+    # while the output image grows to match the eufyMake working canvas.
     if config.output.canvas_size_mm is not None:
         cw, ch = config.output.canvas_size_mm
         dims.printable = dims.printable.__class__(
             width=cw,
             height=ch,
             insert_offset_x=dims.printable.insert_offset_x,
-            insert_offset_y=dims.printable.insert_offset_y,
+            insert_offset_y=dims.printable.insert_offset_y + (ch - dims.printable.height),
             printable_origin_x=dims.printable.printable_origin_x,
             printable_origin_y=dims.printable.printable_origin_y,
             insert_origin_x=dims.printable.insert_origin_x,
@@ -133,14 +131,9 @@ def main(argv: list[str] | None = None) -> int:
         import math
         num_batches = math.ceil(len(config.custom_flaps) / dims.jig.flaps_per_batch)
         print(f"Output: {dpi} DPI, {num_batches} batch(es) × 2 sides = {num_batches * 2} images")
-        orient = config.jig.output_orientation
-        if orient == "landscape":
-            out_w, out_h = pa.height, pa.width
-        else:
-            out_w, out_h = pa.width, pa.height
         from .dimensions import mm_to_px
-        print(f"  Canvas size: {mm_to_px(out_w, dpi)}×{mm_to_px(out_h, dpi)} px "
-              f"({out_w:.1f}×{out_h:.1f} mm)")
+        print(f"  Canvas size: {mm_to_px(pa.width, dpi)}×{mm_to_px(pa.height, dpi)} px "
+              f"({pa.width:.1f}×{pa.height:.1f} mm)")
         print(f"  Insert area: {insert[0]:.1f}×{insert[1]:.1f}mm at offset "
               f"({pa.insert_offset_x:.1f}, {pa.insert_offset_y:.1f})mm")
         print()

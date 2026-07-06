@@ -5,6 +5,12 @@
 // DO NOT EDIT MANUALLY.
 // Edit the 'jig' section in the job JSON file instead,
 // then run: python -m pvv_tools.flap_printer <job.json>
+//
+// Coordinates are in printer orientation (matching the physical jig
+// on the eufyMake E1 Mini Flatbed viewed from above): the mat's long
+// axis runs along X; the zero-point / corner-cut corner is at the
+// bottom-right.  Flap pockets sit rotated 90° (spool edge facing
+// right), in a single row along X.
 // ==============================================================
 
 // ---- Flap physical dimensions (read from PVV_splitflap_mods.scad by Python) ----
@@ -16,25 +22,25 @@ flap_notch_height = 15.0;
 flap_notch_depth = 3.2;
 
 // ---- eufyMake minibed mat outer geometry ----
-minibed_mat_size_x = 97.0;
-minibed_mat_size_y = 370.0;
+minibed_mat_size_x = 370.0;
+minibed_mat_size_y = 97.0;
 minibed_mat_corner_radius = 7.5;
 minibed_mat_corner_cut = 22.0;
 
 // ---- Printable area (mat absolute coordinates) ----
-minibed_printable_size_x = 88.0;
-minibed_printable_size_y = 333.0;
-minibed_printable_origin_x = 5.0;
-minibed_printable_origin_y = 33.0;
+minibed_printable_size_x = 333.0;
+minibed_printable_size_y = 88.0;
+minibed_printable_origin_x = 4.0;
+minibed_printable_origin_y = 5.0;
 
 // ---- Registration mark geometry ----
 minibed_reg_mark_size = 6.0;
 minibed_reg_mark_stroke = 1.0;
-minibed_reg_mark_extent_y = 333.0;  // same as printable_size_y
+minibed_reg_mark_extent_x = 333.0;  // same as printable_size_x
 
 // ---- Jig grid parameters ----
-minibed_flap_jig_num_flaps_x = 1;
-minibed_flap_jig_num_flaps_y = 6;
+minibed_flap_jig_num_flaps_x = 6;
+minibed_flap_jig_num_flaps_y = 1;
 minibed_flap_jig_laser_kerf = 0.04;    // inward offset to tighten flap pocket fit
 minibed_flap_jig_insert_kerf = 0.04;   // outward offset on insert outline
 minibed_flap_jig_gap_x = 6.0;
@@ -43,11 +49,12 @@ minibed_flap_jig_margin_x = 6.0;
 minibed_flap_jig_margin_y = 6.0;
 
 // ---- Derived jig dimensions (computed by Python from the parameters above) ----
-minibed_flap_jig_space_x = 60;    // flap_width(54.0) + gap_x(6.0)
-minibed_flap_jig_space_y = 49;    // flap_height(43.0) + gap_y(6.0)
-minibed_flap_jig_insert_size_x = 66;   // space_x*num_x - gap_x + 2*margin_x
-minibed_flap_jig_insert_size_y = 300;   // space_y*num_y - gap_y + 2*margin_y
+// Pockets are rotated 90°: X extent = flap_height, Y extent = flap_width.
+minibed_flap_jig_space_x = 49;    // flap_height(43.0) + gap_x(6.0)
+minibed_flap_jig_space_y = 60;    // flap_width(54.0) + gap_y(6.0)
+minibed_flap_jig_insert_size_x = 300;   // space_x*num_x - gap_x + 2*margin_x
+minibed_flap_jig_insert_size_y = 66;   // space_y*num_y - gap_y + 2*margin_y
 
 // ---- Insert position (mat absolute coordinates) ----
-minibed_insert_origin_x = 16.0;
-minibed_insert_origin_y = 49.5;
+minibed_insert_origin_x = 20.5;
+minibed_insert_origin_y = 16.0;

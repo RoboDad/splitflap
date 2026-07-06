@@ -49,8 +49,14 @@ class FlapDimensions:
 
 @dataclass(frozen=True)
 class JigDimensions:
-    num_x: int = 1
-    num_y: int = 6
+    """Jig pocket grid in printer orientation (long axis along X).
+
+    Flap pockets sit rotated 90° in the jig (spool edge facing the mat zero
+    point at the right), so a pocket's X extent is flap.height and its Y
+    extent is flap.width.
+    """
+    num_x: int = 6
+    num_y: int = 1
     gap_x: float = 6.0            # mm between flap pockets horizontally
     gap_y: float = 6.0            # mm between flap pockets vertically
     margin_x: float = 6.0         # mm margin around grid
@@ -61,9 +67,12 @@ class JigDimensions:
         return self.num_x * self.num_y
 
     def insert_size(self, flap: FlapDimensions) -> tuple[float, float]:
-        """Return (width_mm, height_mm) of the jig insert in SCAD orientation (portrait)."""
-        space_x = flap.width + self.gap_x
-        space_y = flap.height + self.gap_y
+        """Return (width_mm, height_mm) of the jig insert in printer orientation.
+
+        Pockets are rotated 90°: X extent = flap.height, Y extent = flap.width.
+        """
+        space_x = flap.height + self.gap_x
+        space_y = flap.width + self.gap_y
         w = space_x * self.num_x - self.gap_x + 2 * self.margin_x
         h = space_y * self.num_y - self.gap_y + 2 * self.margin_y
         return (w, h)
@@ -73,23 +82,25 @@ class JigDimensions:
 class PrintableAreaDimensions:
     """Printable area of the printer bed, and the insert's position within it.
 
-    The four fields below (width/height/insert_offset_x/insert_offset_y) define
-    the canvas the renderer draws onto and where the jig insert sits on it.
-    By default these come from the SCAD printable-area + insert geometry, but
+    Coordinates are in printer orientation: the long axis runs along X and
+    the mat zero point is at the image's lower-right corner.  The four
+    fields below (width/height/insert_offset_x/insert_offset_y) define the
+    canvas the renderer draws onto and where the jig insert sits on it.
+    By default these come from the jig printable-area + insert geometry, but
     `output.canvas_size_mm` in the job config can replace them with the
     eufyMake Studio mat-canvas dimensions (using absolute mat coordinates for
     the insert).  The `*_origin_*` fields below are the raw absolute mat
-    coordinates exported from SCAD; they enable that override in cli.py.
+    coordinates; they enable that override in cli.py.
     """
-    width: float = 88.0           # mm — canvas width  (defaults to minibed_printable_size_x)
-    height: float = 333.0         # mm — canvas height (defaults to minibed_printable_size_y)
-    insert_offset_x: float = 11.0 # mm — insert X within canvas
-    insert_offset_y: float = 15.0 # mm — insert Y within canvas
-    # Raw absolute mat coordinates (from SCAD); used when canvas is overridden
-    printable_origin_x: float = 5.0
-    printable_origin_y: float = 33.0
-    insert_origin_x: float = 16.0
-    insert_origin_y: float = 49.5
+    width: float = 333.0          # mm — canvas width  (defaults to minibed_printable_size_x)
+    height: float = 88.0          # mm — canvas height (defaults to minibed_printable_size_y)
+    insert_offset_x: float = 16.5 # mm — insert X within canvas
+    insert_offset_y: float = 11.0 # mm — insert Y within canvas
+    # Raw absolute mat coordinates; used when canvas is overridden
+    printable_origin_x: float = 4.0
+    printable_origin_y: float = 5.0
+    insert_origin_x: float = 20.5
+    insert_origin_y: float = 16.0
 
 
 @dataclass(frozen=True)
@@ -183,18 +194,18 @@ class AllDimensions:
         else:
             # Legacy: resolve jig + printable dims from SCAD echoes / overrides / defaults.
             jig = JigDimensions(
-                num_x=int(_get('minibed_flap_jig_num_flaps_x', 1)),
-                num_y=int(_get('minibed_flap_jig_num_flaps_y', 6)),
+                num_x=int(_get('minibed_flap_jig_num_flaps_x', 6)),
+                num_y=int(_get('minibed_flap_jig_num_flaps_y', 1)),
                 gap_x=_get('minibed_flap_jig_gap_x', 6.0),
                 gap_y=_get('minibed_flap_jig_gap_y', 6.0),
                 margin_x=_get('minibed_flap_jig_margin_x', 6.0),
                 margin_y=_get('minibed_flap_jig_margin_y', 6.0),
             )
             insert_w, insert_h = jig.insert_size(flap)
-            printable_w = _get('minibed_printable_size_x', 88.0)
-            printable_h = _get('minibed_printable_size_y', 333.0)
-            printable_origin_x = _get('minibed_printable_origin_x', 5.0)
-            printable_origin_y = _get('minibed_printable_origin_y', 33.0)
+            printable_w = _get('minibed_printable_size_x', 333.0)
+            printable_h = _get('minibed_printable_size_y', 88.0)
+            printable_origin_x = _get('minibed_printable_origin_x', 4.0)
+            printable_origin_y = _get('minibed_printable_origin_y', 5.0)
             insert_offset_x = (printable_w - insert_w) / 2.0
             insert_offset_y = (printable_h - insert_h) / 2.0
             insert_origin_x = insert_offset_x + printable_origin_x

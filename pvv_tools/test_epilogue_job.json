@@ -4,7 +4,7 @@
     "module_pitch_mm": 64.0,
     "inter_module_gap_mm": 10.0
   },
-  "jig": {"type": "minibed", "flip_mode": "left-right", "output_orientation": "landscape"},
+  "jig": {"type": "minibed", "flip_mode": "left-right"},
   "output": {
     "dpi": 360,
     "format": "png",

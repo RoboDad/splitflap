@@ -16,19 +16,18 @@
   "jig": {
     "type": "minibed",
     "flip_mode": "front-back",
-    "output_orientation": "landscape",
-    "num_flaps_x": 1,
-    "num_flaps_y": 6,
+    "num_flaps_x": 6,
+    "num_flaps_y": 1,
     "gap_x_mm": 6,
     "gap_y_mm": 6,
     "margin_x_mm": 6,
     "margin_y_mm": 6,
-    "printable_size_x_mm": 88,
-    "printable_size_y_mm": 333,
-    "printable_origin_x_mm": 5.0,
-    "printable_origin_y_mm": 33.0,
-    "insert_origin_x_mm": 16,
-    "insert_origin_y_mm": 49.5
+    "printable_size_x_mm": 333,
+    "printable_size_y_mm": 88,
+    "printable_origin_x_mm": 4.0,
+    "printable_origin_y_mm": 5.0,
+    "insert_origin_x_mm": 20.5,
+    "insert_origin_y_mm": 16
   },
   "output": {
     "dpi": 508,

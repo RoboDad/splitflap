@@ -1,5 +1,21 @@
 """Batch grid layout: arrange flap side images on the jig, apply flip
 transforms, and generate ink-saving masks.
+
+Two coordinate frames appear in this module:
+
+- The **upright frame**: flap content as it appears on the display —
+  character upright, flap.width across, flap.height tall, spool/pin edge
+  at the bottom of a front (top-half) image.  All flap-side images and the
+  flap mask polygon are built in this frame.
+- The **sheet frame**: the output print image, identical to the physical
+  jig on the printer bed viewed from above — long axis along X, mat zero
+  point at the lower-right.  Flap pockets sit rotated 90° in the jig, so
+  when an upright image is placed on the sheet it is rotated 90° CCW
+  (``Image.ROTATE_90``): its top edge faces left and its spool edge faces
+  right, toward the zero point.
+
+The 90° CCW placement rotation is the ONLY transform between the two
+frames, and it is applied per-flap at paste time.
 """
 
 from __future__ import annotations
@@ -73,25 +89,27 @@ def generate_batch_image(
     jig: JigDimensions,
     printable: PrintableAreaDimensions,
     dpi: float,
-    orientation: str = "landscape",
     spool_at_bottom: bool = True,
 ) -> Image.Image:
     """Arrange up to jig.flaps_per_batch flap images on a printable-area-sized canvas.
 
-    The canvas matches the full printable area of the printer bed.  The jig
-    insert is positioned at (insert_offset_x, insert_offset_y) within that
-    area, and the flap grid is positioned within the insert using margins.
+    The canvas matches the full printable area of the printer bed (sheet
+    frame).  The jig insert is positioned at (insert_offset_x,
+    insert_offset_y) within that area, and the flap grid is positioned
+    within the insert using margins.  Pockets sit rotated 90° in the jig,
+    so a pocket's X extent is flap.height and its Y extent is flap.width;
+    each upright flap image is rotated 90° CCW as it is pasted.
 
     Images in *flap_sides* may extend beyond the pocket boundary on flush edges
     (bleed zone encoded in the image size).  The paste position is offset so that
     the physical pocket area aligns with its grid coordinates.
 
-    *spool_at_bottom* — True for front batches (display/outer edge at top, spool
-    at bottom); False for back batches (spool at top, display edge at bottom).
-    For front batches the vertical bleed extends upward above the pocket; for
-    back batches it extends downward.
-
-    If orientation is "landscape", the final image is rotated 90° CCW.
+    *spool_at_bottom* — True for front batches (display/outer edge at the
+    upright top, spool at the upright bottom); False for back batches
+    (upright spool at top).  In the sheet frame this means front sheets
+    have their spool edges facing right (matching the jig pockets) and
+    their outer-edge bleed extending left of the pocket; back sheets are
+    the reverse.
 
     Returns an RGBA image at the correct physical size for the given DPI.
     """
@@ -108,8 +126,9 @@ def generate_batch_image(
     flap_h_px = mm_to_px(flap.height, dpi)
     margin_x_px = mm_to_px(jig.margin_x, dpi)
     margin_y_px = mm_to_px(jig.margin_y, dpi)
-    space_x_px = mm_to_px(flap.width + jig.gap_x, dpi)
-    space_y_px = mm_to_px(flap.height + jig.gap_y, dpi)
+    # Pockets are rotated 90°: X extent = flap.height, Y extent = flap.width
+    space_x_px = mm_to_px(flap.height + jig.gap_x, dpi)
+    space_y_px = mm_to_px(flap.width + jig.gap_y, dpi)
 
     for i, fs in enumerate(flap_sides[:jig.flaps_per_batch]):
         col = i % jig.num_x
@@ -118,23 +137,28 @@ def generate_batch_image(
         pocket_x = insert_x_px + margin_x_px + col * space_x_px
         pocket_y = insert_y_px + margin_y_px + row * space_y_px
 
-        img = fs.image
-        # Bleed amounts are encoded in the image dimensions vs the pocket size
-        bleed_x = max(0, (img.width - flap_w_px) // 2)
-        bleed_y = max(0, img.height - flap_h_px)
+        # Rotate the upright image into the sheet frame: top edge → left,
+        # spool edge → right.
+        img = fs.image.transpose(Image.ROTATE_90)
 
-        paste_x = pocket_x - bleed_x
+        # Bleed amounts are encoded in the image dimensions vs the pocket
+        # size.  After rotation the pocket occupies flap_h_px along X and
+        # flap_w_px along Y within the image.
+        bleed_x = max(0, img.width - flap_h_px)          # outer-edge bleed (upright top)
+        bleed_y_total = max(0, img.height - flap_w_px)   # side bleed, centred on the pocket
+
         if spool_at_bottom:
-            # Front: outer display edge at top — vertical bleed extends above pocket
-            paste_y = pocket_y - bleed_y
+            # Front: outer display edge faces left — bleed extends left of pocket
+            paste_x = pocket_x - bleed_x
         else:
-            # Back: outer display edge at bottom — vertical bleed extends below pocket
-            paste_y = pocket_y
+            # Back: outer display edge faces right — bleed extends right of pocket
+            paste_x = pocket_x
+        # Side bleed is centred; an odd leftover pixel goes below the pocket
+        # (the upright frame centres with the leftover on its left edge,
+        # which the CCW rotation maps to the sheet bottom).
+        paste_y = pocket_y - (bleed_y_total - bleed_y_total // 2)
 
         canvas.paste(img, (paste_x, paste_y), img)
-
-    if orientation == "landscape":
-        canvas = canvas.transpose(Image.ROTATE_90)
 
     return canvas
 
@@ -190,36 +214,21 @@ def draw_registration_marks(
     return img
 
 
-def apply_flip_transform(image: Image.Image, flip_mode: str) -> Image.Image:
-    """Flip an image to produce the back-side print layout.
-
-    "left-right": mirror horizontally (operator flips jig left-to-right).
-    "front-back": mirror vertically (operator flips jig front-to-back).
-    """
-    if flip_mode == "left-right":
-        return image.transpose(Image.FLIP_LEFT_RIGHT)
-    elif flip_mode == "front-back":
-        return image.transpose(Image.FLIP_TOP_BOTTOM)
-    else:
-        raise ValueError(f"Unknown flip_mode: {flip_mode!r}")
-
-
 def reorder_for_jig_flip(
     flap_sides: list[FlapSide],
     jig: 'JigDimensions',
     flip_mode: str,
-    orientation: str = "landscape",
 ) -> list[FlapSide]:
     """Reorder flap sides to their post-jig-flip grid positions.
 
-    Unlike apply_flip_transform (which mirrors the entire canvas and thus
-    mirrors individual flap content), this places each flap at its
-    physically-correct post-flip position while preserving the original
-    content orientation.
+    This places each flap at its physically-correct post-flip position
+    while preserving the original content orientation.
 
-    For landscape + left-right flip: portrait rows are reversed.
-    For landscape + front-back flip: portrait columns are reversed.
-    (Portrait mode is the inverse.)
+    In the sheet frame:
+    - "left-right" flip (rotation about the jig's short Y axis) reverses
+      pocket positions along X → columns are reversed.
+    - "front-back" flip (pancake flip about the long X axis) reverses
+      pocket positions along Y → rows are reversed.
     """
     if not flap_sides:
         return flap_sides
@@ -227,14 +236,8 @@ def reorder_for_jig_flip(
     total = jig.num_x * jig.num_y
 
     # Decide which grid axis to reverse
-    reverse_rows = (
-        (flip_mode == "left-right" and orientation == "landscape") or
-        (flip_mode == "front-back" and orientation == "portrait")
-    )
-    reverse_cols = (
-        (flip_mode == "left-right" and orientation == "portrait") or
-        (flip_mode == "front-back" and orientation == "landscape")
-    )
+    reverse_cols = flip_mode == "left-right"
+    reverse_rows = flip_mode == "front-back"
 
     result: list[Optional[FlapSide]] = [None] * total
 
@@ -375,30 +378,6 @@ def _flap_mask_polygon(
     return pts
 
 
-def _draw_flap_mask(
-    draw: ImageDraw.ImageDraw,
-    x: int, y: int,
-    flap_w: int, flap_h: int,
-    corner_r: int,
-    notch_depth: int,
-    notch_height: int,
-    pin_w: int,
-    bleed: int,
-    spool_at_bottom: bool,
-) -> None:
-    """Draw one flap mask shape as a filled white polygon.
-
-    The mask matches the actual flap profile (with notches and correct
-    corner radii) expanded outward by *bleed*.
-    """
-    pts = _flap_mask_polygon(
-        x, y, flap_w, flap_h,
-        corner_r, notch_depth, notch_height, pin_w,
-        bleed, spool_at_bottom,
-    )
-    draw.polygon(pts, fill=255)
-
-
 def apply_ink_save_mask(
     image: Image.Image,
     flap: FlapDimensions,
@@ -406,7 +385,6 @@ def apply_ink_save_mask(
     printable: PrintableAreaDimensions,
     dpi: float,
     bleed_mm: float = 1.0,
-    orientation: str = "landscape",
     spool_at_bottom: bool = True,
 ) -> Image.Image:
     """Zero out alpha outside the flap pocket areas (expanded by bleed).
@@ -414,14 +392,18 @@ def apply_ink_save_mask(
     This saves ink by only printing within the flap outlines + margin.
     The mask is drawn on a printable-area-sized canvas at the insert offset.
 
-    *spool_at_bottom* controls which end of each pocket gets the notch:
-    True for front batches (top halves), False for back batches (bottom halves).
+    The flap outline polygon is built in the upright frame (where the
+    verified notch geometry lives), drawn once into a tile, rotated 90° CCW
+    into the sheet frame, and pasted at every pocket position.
+
+    *spool_at_bottom* controls which end of each pocket gets the notch (in
+    the upright frame): True for front batches (top halves), False for back
+    batches (bottom halves).
     """
     mask_w = mm_to_px(printable.width, dpi)
     mask_h = mm_to_px(printable.height, dpi)
 
     mask = Image.new('L', (mask_w, mask_h), 0)
-    draw = ImageDraw.Draw(mask)
 
     insert_x_px = mm_to_px(printable.insert_offset_x, dpi)
     insert_y_px = mm_to_px(printable.insert_offset_y, dpi)
@@ -430,26 +412,36 @@ def apply_ink_save_mask(
     flap_h_px = mm_to_px(flap.height, dpi)
     margin_x_px = mm_to_px(jig.margin_x, dpi)
     margin_y_px = mm_to_px(jig.margin_y, dpi)
-    space_x_px = mm_to_px(flap.width + jig.gap_x, dpi)
-    space_y_px = mm_to_px(flap.height + jig.gap_y, dpi)
+    # Pockets are rotated 90°: X extent = flap.height, Y extent = flap.width
+    space_x_px = mm_to_px(flap.height + jig.gap_x, dpi)
+    space_y_px = mm_to_px(flap.width + jig.gap_y, dpi)
     corner_r_px = mm_to_px(flap.corner_radius, dpi)
     notch_d_px = mm_to_px(flap.notch_depth, dpi)
     notch_h_px = mm_to_px(flap.notch_height, dpi)
     pin_w_px = mm_to_px(flap.pin_width, dpi)
     bleed_px = mm_to_px(bleed_mm, dpi)
 
+    # All pockets are identical, so draw the upright flap outline once.
+    # The polygon spans [-bleed, size+bleed] inclusive on each axis, i.e.
+    # size + 2*bleed + 1 drawn pixels.
+    tile = Image.new('L', (flap_w_px + 2 * bleed_px + 1, flap_h_px + 2 * bleed_px + 1), 0)
+    tile_draw = ImageDraw.Draw(tile)
+    pts = _flap_mask_polygon(
+        bleed_px, bleed_px, flap_w_px, flap_h_px,
+        corner_r_px, notch_d_px, notch_h_px, pin_w_px,
+        bleed_px, spool_at_bottom,
+    )
+    tile_draw.polygon(pts, fill=255)
+    # Rotate into the sheet frame (upright top edge → left, spool → right)
+    tile = tile.transpose(Image.ROTATE_90)
+
     for row in range(jig.num_y):
         for col in range(jig.num_x):
-            x = insert_x_px + margin_x_px + col * space_x_px
-            y = insert_y_px + margin_y_px + row * space_y_px
-            _draw_flap_mask(
-                draw, x, y, flap_w_px, flap_h_px,
-                corner_r_px, notch_d_px, notch_h_px, pin_w_px, bleed_px,
-                spool_at_bottom,
-            )
-
-    if orientation == "landscape":
-        mask = mask.transpose(Image.ROTATE_90)
+            pocket_x = insert_x_px + margin_x_px + col * space_x_px
+            pocket_y = insert_y_px + margin_y_px + row * space_y_px
+            # The tile's one extra inclusive-boundary pixel sits at its top
+            # after the CCW rotation, hence the additional -1 on Y.
+            mask.paste(tile, (pocket_x - bleed_px, pocket_y - bleed_px - 1), tile)
 
     # Apply mask: zero alpha outside flap shapes
     result = image.copy()

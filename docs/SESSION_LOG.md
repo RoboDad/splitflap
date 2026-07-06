@@ -477,3 +477,78 @@ Fix OpenSCAD warning "Ignoring unknown module 'pvv_rounded_square'" on line 130 
   parameter for selective rounding (unused in jigs.scad).
 - `PVV_splitflap_mods.scad` has uncommitted top-level call changes
   (`print_plate` / `motor_flange_alignment_jig` toggle) — working state, not staged.
+
+## 2026-07-05 - flap_printer + jig SCAD: unify on printer orientation (remove portrait/landscape)
+
+- **Model:** Claude Fable 5
+- **Commits:** none (uncommitted)
+- **Files touched:**
+  - `pvv_cad/flap_printer_jigs.scad` (rewritten in printer orientation)
+  - `pvv_cad/flap_printer_params.scad` (regenerated)
+  - `pvv_tools/flap_printer/` `config.py`, `dimensions.py`, `layout.py`,
+    `labels.py`, `renderer.py`, `cli.py`, `scad_writer.py`
+  - All job JSONs (`prototype_job.json`, `prototype_job_v1.json`,
+    `pvv_job_snippets.json`, `example_job.json`, `test_job.json`,
+    `test_svg_job.json`, `test_epilogue_job.json`, `PVV_TestFlapSet_01.json`)
+  - `pvv_tools/README.md`, `CLAUDE.md`
+
+### Goal
+Eliminate the portrait/landscape dual-frame confusion: the OpenSCAD jig was
+modeled with its long axis along Y (rotated 90 deg from how it physically sits
+on the eufyMake E1 Mini Flatbed).  Refactor so SCAD, the job JSON `jig`
+section, and the Python renderer all share ONE frame ("printer orientation"):
+long axis along X, mat zero-point / corner-cut corner at bottom-right, exactly
+matching the physical top-down view and the output print images.
+
+### Changes
+- **SCAD**: `flap_printer_jigs.scad` rewritten — mat 370x97, printable area
+  333x88 at (4,5), insert 300x66 at (20.5,16), corner cut at (370,0), six
+  pockets in a row along X with `rotate(90) flap_2d()` (spool edge right,
+  toward the zero point).  Fingernail relief moved with the geometry (insert
+  bottom-right corner).  `minibed_reg_mark_extent_y` -> `_extent_x`.
+- **Python**: `output_orientation` config key removed entirely (warning if
+  present; second warning if a job's `printable_size_x < y`, i.e. the old
+  rotated convention).  Flap content stays composed in the "upright frame";
+  the ONE transform to the sheet is a per-flap `Image.ROTATE_90` (CCW) at
+  batch-layout time (upright top -> sheet left, spool -> sheet right).  The
+  ink-save mask polygon stays in the verified upright frame, drawn once into
+  a tile, rotated, and pasted per pocket.  `JigDimensions.insert_size` and
+  all pocket spacing now use `flap.height` along X / `flap.width` along Y.
+  Labels are drawn via a temporary ROTATE_270 into the upright frame.
+  Dead `apply_flip_transform` removed; `reorder_for_jig_flip` loses its
+  orientation param (left-right flip reverses columns, front-back reverses
+  rows — sheet frame).  `canvas_size_mm` is now sheet-frame `[w, h]` (e.g.
+  Camera mode `[335, 90]`), with the insert anchored to the image's left and
+  bottom edges to preserve the previously calibrated placement.
+- **Job JSONs**: jig sections converted (num_flaps 6x1, printable 333x88 at
+  (4,5), insert at (20.5,16)); `output_orientation` dropped everywhere.
+- **Docs**: README jig table + orientation preamble, canvas/calibration
+  notes, spec table, pipeline walkthrough; CLAUDE.md gained an "Orientation
+  convention (critical rule)" section.
+
+### Verification
+- Rendered 4 reference variants BEFORE the refactor (default front-back,
+  `--flip-mode left-right`, labels+registration-marks, `canvas_size_mm`
+  override) and re-rendered AFTER: **all 116 output files byte-identical**
+  (script in session scratchpad).  Output images were already in printer
+  orientation, so this proves the refactor is a pure internal reframing.
+- OpenSCAD top-view renders of old vs new jig confirm the same physical
+  geometry rotated 90 deg: corner cut + fingernail relief at bottom-right,
+  pocket notches facing right; no OpenSCAD warnings.
+
+### Notes / decisions
+- `spool_at_bottom` parameter names kept — they refer to the upright content
+  frame (documented in CLAUDE.md); renaming to sheet terms would re-couple
+  mask geometry to the sheet frame for no gain.
+- The flip-geometry rule (`reflect_x == rotate180 . reflect_y`) is
+  frame-independent and unchanged.
+- Exact byte-identity required two subtle equivalences, both commented in
+  `layout.py`: the odd-pixel side-bleed remainder goes below the pocket, and
+  the mask tile pastes 1 px higher because polygon boundary pixels are
+  inclusive.  At DPIs where mm->px rounding is non-integer (e.g. 360), new
+  vs old placement could in principle differ by <=1 px (0.07 mm) since
+  offsets are now rounded in sheet space; at 508 DPI (20 px/mm) everything
+  is exact.
+- `pvv_plans/flap_printer_plan.md` still uses the old terms — left as-is
+  (historical planning record).
+- `prototype_job_v1.json` was also converted so it stays runnable.

@@ -38,30 +38,38 @@ class DisplayConfig:
 
 @dataclass
 class JigConfig:
+    """Jig geometry in printer orientation.
+
+    All coordinates match the physical jig on the eufyMake E1 Mini Flatbed
+    viewed from above: the mat's long axis runs along X, and the mat
+    zero-point (corner-cut) corner is at the bottom-right.  The OpenSCAD
+    model, the output print images, and the physical flatbed all share this
+    frame.  Flap pockets sit rotated 90° (spool edge facing right), so a
+    pocket's X extent is flap_height and its Y extent is flap_width.
+    """
     type: str = "minibed"
     flip_mode: str = "front-back"        # "left-right" | "front-back"
-    output_orientation: str = "landscape"  # "landscape" | "portrait"
-    # Grid parameters
-    num_flaps_x: int = 1
-    num_flaps_y: int = 6
+    # Grid parameters — pockets run in a row along X (the mat's long axis)
+    num_flaps_x: int = 6
+    num_flaps_y: int = 1
     gap_x_mm: float = 6.0
     gap_y_mm: float = 6.0
     margin_x_mm: float = 6.0
     margin_y_mm: float = 6.0
     # Printable area — absolute coordinates on the mat
-    printable_size_x_mm: float = 88.0
-    printable_size_y_mm: float = 333.0
-    printable_origin_x_mm: float = 5.0
-    printable_origin_y_mm: float = 33.0
+    printable_size_x_mm: float = 333.0
+    printable_size_y_mm: float = 88.0
+    printable_origin_x_mm: float = 4.0
+    printable_origin_y_mm: float = 5.0
     # Insert lower-left corner — absolute coordinates on the mat
-    insert_origin_x_mm: float = 16.0
-    insert_origin_y_mm: float = 49.5
+    insert_origin_x_mm: float = 20.5
+    insert_origin_y_mm: float = 16.0
     # Laser kerf compensations (mm)
     laser_kerf_mm: float = 0.04
     insert_kerf_mm: float = 0.04
     # Mat outer geometry (eufyMake hardware constants)
-    mat_size_x_mm: float = 97.0
-    mat_size_y_mm: float = 370.0
+    mat_size_x_mm: float = 370.0
+    mat_size_y_mm: float = 97.0
     mat_corner_radius_mm: float = 7.5
     mat_corner_cut_mm: float = 22.0
     # Registration mark geometry (for laser cut outer jig)
@@ -98,9 +106,9 @@ class OutputConfig:
     # marks all shift together).  Use this to compensate for a systematic
     # offset between the printer's zero-point and the physical jig (e.g.
     # the eufyMake Zero-Point calibration being off by a couple of mm).
-    # Positive dx moves content toward +X in the output image (in landscape
-    # orientation this is the long axis); positive dy moves content toward +Y.
-    # Content shifted past the image edge is clipped.
+    # Positive dx moves content toward +X (the long axis, away from the
+    # zero point); positive dy moves content toward +Y (downward in the
+    # image).  Content shifted past the image edge is clipped.
     calibration_offset_mm: tuple[float, float] = (0.0, 0.0)
 
 
@@ -311,26 +319,29 @@ def load_config(path: str | Path) -> JobConfig:
 
     # Jig section
     j = raw.get('jig', {})
+    if 'output_orientation' in j:
+        logger.warning(
+            "jig.output_orientation is obsolete and ignored — output images "
+            "are always in printer orientation (long axis along X)")
     jig = JigConfig(
         type=_get(j, 'type', 'minibed'),
         flip_mode=_get(j, 'flip_mode', 'front-back'),
-        output_orientation=_get(j, 'output_orientation', 'landscape'),
-        num_flaps_x=int(_get(j, 'num_flaps_x', 1)),
-        num_flaps_y=int(_get(j, 'num_flaps_y', 6)),
+        num_flaps_x=int(_get(j, 'num_flaps_x', 6)),
+        num_flaps_y=int(_get(j, 'num_flaps_y', 1)),
         gap_x_mm=float(_get(j, 'gap_x_mm', 6.0)),
         gap_y_mm=float(_get(j, 'gap_y_mm', 6.0)),
         margin_x_mm=float(_get(j, 'margin_x_mm', 6.0)),
         margin_y_mm=float(_get(j, 'margin_y_mm', 6.0)),
-        printable_size_x_mm=float(_get(j, 'printable_size_x_mm', 88.0)),
-        printable_size_y_mm=float(_get(j, 'printable_size_y_mm', 333.0)),
-        printable_origin_x_mm=float(_get(j, 'printable_origin_x_mm', 5.0)),
-        printable_origin_y_mm=float(_get(j, 'printable_origin_y_mm', 33.0)),
-        insert_origin_x_mm=float(_get(j, 'insert_origin_x_mm', 16.0)),
-        insert_origin_y_mm=float(_get(j, 'insert_origin_y_mm', 49.5)),
+        printable_size_x_mm=float(_get(j, 'printable_size_x_mm', 333.0)),
+        printable_size_y_mm=float(_get(j, 'printable_size_y_mm', 88.0)),
+        printable_origin_x_mm=float(_get(j, 'printable_origin_x_mm', 4.0)),
+        printable_origin_y_mm=float(_get(j, 'printable_origin_y_mm', 5.0)),
+        insert_origin_x_mm=float(_get(j, 'insert_origin_x_mm', 20.5)),
+        insert_origin_y_mm=float(_get(j, 'insert_origin_y_mm', 16.0)),
         laser_kerf_mm=float(_get(j, 'laser_kerf_mm', 0.04)),
         insert_kerf_mm=float(_get(j, 'insert_kerf_mm', 0.04)),
-        mat_size_x_mm=float(_get(j, 'mat_size_x_mm', 97.0)),
-        mat_size_y_mm=float(_get(j, 'mat_size_y_mm', 370.0)),
+        mat_size_x_mm=float(_get(j, 'mat_size_x_mm', 370.0)),
+        mat_size_y_mm=float(_get(j, 'mat_size_y_mm', 97.0)),
         mat_corner_radius_mm=float(_get(j, 'mat_corner_radius_mm', 7.5)),
         mat_corner_cut_mm=float(_get(j, 'mat_corner_cut_mm', 22.0)),
         reg_mark_size_mm=float(_get(j, 'reg_mark_size_mm', 6.0)),
@@ -338,6 +349,14 @@ def load_config(path: str | Path) -> JobConfig:
     )
     if jig.flip_mode not in ('left-right', 'front-back'):
         raise ValueError(f"Invalid flip_mode: {jig.flip_mode!r} (expected 'left-right' or 'front-back')")
+    if jig.printable_size_x_mm < jig.printable_size_y_mm:
+        logger.warning(
+            "jig.printable_size_x_mm (%g) < printable_size_y_mm (%g) — this "
+            "looks like a job file in the old rotated convention.  Jig "
+            "coordinates are now in printer orientation: the long axis runs "
+            "along X (e.g. printable area 333 x 88).  Swap the jig section's "
+            "x/y values.",
+            jig.printable_size_x_mm, jig.printable_size_y_mm)
 
     # Output section
     o = raw.get('output', {})
@@ -541,8 +560,7 @@ def print_summary(config: JobConfig) -> None:
     print(f"  Display: {config.display.num_modules} modules, "
           f"pitch={config.display.module_pitch_mm}mm, "
           f"gap={config.display.inter_module_gap_mm}mm")
-    print(f"  Jig: {config.jig.type}, flip={config.jig.flip_mode}, "
-          f"orient={config.jig.output_orientation}")
+    print(f"  Jig: {config.jig.type}, flip={config.jig.flip_mode}")
     print(f"  Output: {config.output.dpi} DPI, format={config.output.format}, "
           f"bleed={config.output.bleed_mm}mm, mask={config.output.ink_save_mask}, "
           f"labels={config.output.labels}")
