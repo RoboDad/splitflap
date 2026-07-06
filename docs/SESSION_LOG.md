@@ -699,3 +699,46 @@ individually), not the whole bed.  Must not change minibed output.
 ### Open items
 - Cut the standard outer jig; zero-point calibration print on the standard
   bed (per-jig calibration_offset_mm slot is ready).
+
+## 2026-07-05 - flap_printer: gap-edge bleed (fix bare-stock sliver at the flap gap)
+
+- **Model:** Claude Fable 5
+- **Commits:** none at log time (committed/pushed same session)
+- **Files touched:**
+  - `pvv_tools/flap_printer/slicer.py` (slice_display_image gap_bleed_px)
+  - `pvv_tools/flap_printer/renderer.py` (thread gap bleed; _crop_to_pocket)
+  - `pvv_tools/flap_printer/layout.py` (gap-aware paste split in
+    generate_batch_image)
+  - `pvv_tools/README.md` (Bleed Margin behavior C; bleed key; pipeline)
+
+### Goal
+Mini-flatbed print test showed thin bars of bare (black) flap stock between
+emoji artwork and the gap-side flap edge.  Root cause: the bleed system
+expanded content only on OUTER flush edges; the gap-side cut edge of each
+half got no bleed for ANY flap type — slice_display_image cropped exactly
+at the gap boundary and discarded the gap strip.
+
+### Fix (user-approved plan, unconditional)
+- Gap-edge bleed is a pure CROP change, not a fit expansion: the display
+  image already contains the artwork's true continuation in the 2 mm gap
+  strip.  Each half now keeps min(bleed_mm, gap) = 1 mm of adjacent gap
+  rows on its cut edge.  No scaling/repositioning of the glyph whatsoever.
+- Applies to ALL flap types unconditionally when bleed_mm > 0 — including
+  "bleed": false emoji/glyphs (that flag now gates outer-edge expansion
+  only).  The ink-save mask already permitted this overprint (spool-edge
+  boundary +bleed, notch voids inset); it needed no change.
+- layout.generate_batch_image splits each image's along-X extra size into
+  gap bleed (spool side) and outer bleed (display side) via a job-wide
+  gap_bleed_px parameter; per-image amounts inferred with min() so blanks
+  and legacy-sized images are unaffected.
+- Preview stays WYSIWYG: _crop_to_pocket trims the gap rows.
+
+### Verification
+- Preview PNGs byte-identical across all variants (gap bleed cropped away).
+- Ring check over 4 render variants (front-back, left-right, gap-coverage
+  job, standard-bed sheets; fronts AND backs): every changed pixel lies in
+  the 1 mm bleed ring around a pocket; pocket interiors pixel-identical.
+  (First run flagged false failures on calibrated variants — the checker
+  had forgotten the minibed's +1 mm calibration shift, not a code bug.)
+- Visual before/after zoom of the heart emoji gap edge: artwork now extends
+  through the cut edge into the bleed zone; notch voids respected.

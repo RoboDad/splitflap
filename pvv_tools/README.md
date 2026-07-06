@@ -251,7 +251,7 @@ An array of objects, one per custom flap. Required fields: `slot`, `source`.
 | `fit_mode` | string | `null` | Per-image fit mode override; `null` = use global default |
 | `notch_mode` | string or `[left, right]` | `null` | Per-image notch-clearance override; `null` = use global default |
 | `offset_mm` | `[dx, dy]` | `null` | Shift image content by `[dx_mm, dy_mm]` within the pocket, applied after all fit/notch transforms and before the ink-save mask. Positive X shifts right, positive Y shifts down. Content pushed past the pocket edge is clipped by the ink-save mask. Useful for fine-tuning the position of an image within its flap without recompositing the source artwork. |
-| `bleed` | bool | `true` | When `false`, skips bleed edge-expansion for this image (the ink-save mask still applies). Useful for images with transparent backgrounds at their edges that don't need the misalignment buffer. |
+| `bleed` | bool | `true` | When `false`, skips OUTER-edge bleed expansion for this image (the ink-save mask and the always-on gap-edge bleed still apply — see [Bleed Margin](#bleed-margin)). Useful for images with transparent outer borders that don't need the misalignment buffer. |
 | `enabled` | bool | `true` | When `false`, output for this flap is fully transparent; the slot position is preserved in the layout. Useful for temporarily disabling a slot without removing it from the config. |
 
 ---
@@ -525,7 +525,7 @@ treated identically to raster inputs once loaded:
 
 ### Bleed Margin
 
-The `bleed_mm` setting (default `1.0`) controls two related but distinct
+The `bleed_mm` setting (default `1.0`) controls three related but distinct
 behaviors:
 
 #### A — Ink-save mask expansion
@@ -579,10 +579,29 @@ fit-mode rule above.
 
 To disable bleed expansion for a specific image (e.g., an emoji on a
 transparent background that doesn't need the buffer), set `"bleed": false`
-on that `custom_flaps` entry. The ink-save mask (behavior A) still applies.
+on that `custom_flaps` entry. The ink-save mask (behavior A) and gap-edge
+bleed (behavior C below) still apply.
 
 At 508 DPI with 1 mm bleed, the expansion is ~20 px per flush edge
 (≈ 3.7 % on a 54 mm-wide pocket, ≈ 4.7 % on a 43 mm-tall half).
+
+#### C — Gap-edge bleed (always on)
+
+The gap-side edge of each half — where the display image is cut at the
+2 mm inter-flap gap — is not an outer edge, so behavior B never applies
+there.  Instead, each half keeps `min(bleed_mm, gap)` of the adjacent
+gap-strip content attached to its cut edge: the *true* continuation of the
+artwork past the cut line, with **no fit expansion, scaling, or
+repositioning** of the glyph.  This prevents a slight print-vs-flap
+misalignment from exposing a sliver of bare stock right at the gap, where
+content (an emoji at its widest, a letter stem) typically runs
+edge-to-edge.
+
+Because it needs no expansion, gap-edge bleed applies to **all** flap types
+unconditionally whenever `bleed_mm > 0` — including `"bleed": false`
+entries, whose flag only suppresses the outer-edge expansion of behavior B.
+The ink-save mask already permits this overprint (its spool-edge boundary
+sits `bleed_mm` past the pocket, with the notch voids properly inset).
 
 ---
 
@@ -745,8 +764,10 @@ pvv_tools/
       `bleed_mm` on flush edges before fitting, so the returned image
       overflows the pocket on those sides with real content.
    4. Slices into top/bottom halves with `slicer.slice_display_image`
-      (top `flap_height` mm + any top bleed, skip `flap_gap` mm, then
-      `flap_height` mm + any bottom bleed).
+      (top `flap_height` mm + any outer bleed, skip `flap_gap` mm, then
+      `flap_height` mm + any outer bleed).  Each half also keeps
+      `min(bleed_mm, gap)` of the adjacent gap-strip rows on its cut edge
+      (gap-edge bleed — see [Bleed Margin](#bleed-margin)).
    5. For `multi-module`, the segment covering the current module is
       selected (flat entries are normalised to one segment at load time),
       its image is fit to the segment's span

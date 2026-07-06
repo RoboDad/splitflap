@@ -85,8 +85,12 @@ def _render_custom_flap_images(
     if cf.type == "blank" or not cf.enabled:
         return blank, blank
 
-    # Per-flap bleed override: bleed=False suppresses edge expansion for this image
+    # Per-flap bleed override: bleed=False suppresses OUTER-edge fit expansion
+    # for this image.  Gap-edge bleed (below) is independent of cf.bleed: it
+    # needs no expansion or scaling — the rows already exist in the display
+    # image's gap strip — so it applies to all flap types unconditionally.
     effective_bleed_px = bleed_px if cf.bleed else 0
+    gap_bleed_px = min(bleed_px, mm_to_px(dims.flap.gap, dpi))
 
     gt = config.global_transforms
 
@@ -121,7 +125,7 @@ def _render_custom_flap_images(
         img = fit_with_notch_mode(img, target_w, target_h, fit, notch[0], notch[1], notch_inset_px, effective_bleed_px)
         img = _apply_offset(img, cf.offset_mm)
         bleed_y = max(0, (img.height - mm_to_px(dims.flap.display_height, dpi)) // 2)
-        return slice_display_image(img, dims.flap, dpi, bleed_y=bleed_y)
+        return slice_display_image(img, dims.flap, dpi, bleed_y=bleed_y, gap_bleed_px=gap_bleed_px)
 
     if cf.type == "multi-module":
         if module_index < 0:
@@ -150,7 +154,7 @@ def _render_custom_flap_images(
         column = fit_with_notch_mode(column, flap_w_px, flap_display_h, fit, notch[0], notch[1], notch_inset_px, effective_bleed_px)
         column = _apply_offset(column, _pick(seg.offset_mm, cf.offset_mm))
         bleed_y = max(0, (column.height - mm_to_px(dims.flap.display_height, dpi)) // 2)
-        return slice_display_image(column, dims.flap, dpi, bleed_y=bleed_y)
+        return slice_display_image(column, dims.flap, dpi, bleed_y=bleed_y, gap_bleed_px=gap_bleed_px)
 
     return None  # unknown type
 
@@ -202,22 +206,26 @@ def _crop_to_pocket(
     flap_w: int,
     flap_h: int,
     is_top: bool,
+    gap_bleed_px: int = 0,
 ) -> Image.Image:
     """Crop a (possibly bleed-expanded) half-flap image to the physical pocket area.
 
-    For top halves the outer bleed is at the top of the image; for bottom
-    halves it is at the bottom.  Returns img unchanged when there is no bleed.
+    Half images may carry outer bleed (top of top halves, bottom of bottom
+    halves) and gap-edge bleed (the opposite side, up to *gap_bleed_px*
+    rows).  Returns img unchanged when there is no bleed.
     """
     bx = max(0, (img.width - flap_w) // 2)
-    by = max(0, img.height - flap_h)
-    if bx == 0 and by == 0:
+    extra_y = max(0, img.height - flap_h)
+    if bx == 0 and extra_y == 0:
         return img
+    gap = min(gap_bleed_px, extra_y)
+    outer = extra_y - gap
     if is_top:
-        # Bleed at outer top → visible pocket area occupies the bottom flap_h rows
-        return img.crop((bx, by, bx + flap_w, img.height))
+        # Rows: [outer][flap_h][gap] → pocket area starts after the outer bleed
+        return img.crop((bx, outer, bx + flap_w, outer + flap_h))
     else:
-        # Bleed at outer bottom → visible pocket area occupies the top flap_h rows
-        return img.crop((bx, 0, bx + flap_w, flap_h))
+        # Rows: [gap][flap_h][outer] → pocket area starts after the gap bleed
+        return img.crop((bx, gap, bx + flap_w, gap + flap_h))
 
 
 def _collect_preview_entries(
@@ -239,6 +247,7 @@ def _collect_preview_entries(
     flap_w = mm_to_px(dims.flap.width, dpi)
     flap_h = mm_to_px(dims.flap.height, dpi)
     bleed_px = mm_to_px(config.output.bleed_mm, dpi)
+    gap_bleed_px = min(bleed_px, mm_to_px(dims.flap.gap, dpi))
     blank = Image.new('RGBA', (flap_w, flap_h), (0, 0, 0, 0))
 
     # Modules that will be rendered (>= 0 only; -1 sentinel excluded)
@@ -255,15 +264,15 @@ def _collect_preview_entries(
                 else:
                     pair = (blank.copy(), blank.copy())
                     winning_label = f"BLANK M{m} · #{cf.slot}"
-                top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True)
-                bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False)
+                top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True, gap_bleed_px=gap_bleed_px)
+                bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False, gap_bleed_px=gap_bleed_px)
                 entries.append((top, bottom, winning_label))
         else:
             # Render module-agnostic
             pair = _render_custom_flap_images(cf, config, -1, dims, dpi, bleed_px)
             if pair is not None:
-                top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True)
-                bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False)
+                top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True, gap_bleed_px=gap_bleed_px)
+                bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False, gap_bleed_px=gap_bleed_px)
                 entries.append((top, bottom, f"{cf.label} · #{cf.slot}"))
 
     return entries
@@ -398,6 +407,7 @@ def _render_sheets(
 
     per_sheet = dims.jig.flaps_per_sheet
     per_row = dims.jig.flaps_per_batch
+    gap_bleed_px = min(bleed_px, mm_to_px(dims.flap.gap, dpi))
     num_sheets = math.ceil(len(entries) / per_sheet)
     out_dir.mkdir(parents=True, exist_ok=True)
     fmt = config.output.format.lower()
@@ -422,9 +432,9 @@ def _render_sheets(
                 back_batch[start:start + per_row], dims.jig, "left-right")
 
         front_img = generate_batch_image(front_batch, dims.flap, dims.jig, dims.printable, dpi,
-                                         spool_at_bottom=True)
+                                         spool_at_bottom=True, gap_bleed_px=gap_bleed_px)
         back_img = generate_batch_image(reordered_back, dims.flap, dims.jig, dims.printable, dpi,
-                                        spool_at_bottom=False)
+                                        spool_at_bottom=False, gap_bleed_px=gap_bleed_px)
 
         if mask_on:
             front_img = apply_ink_save_mask(front_img, dims.flap, dims.jig, dims.printable, dpi,
@@ -492,6 +502,7 @@ def render_job(
     modules = _get_modules_to_process(config, module_filter)
     generated: list[Path] = []
     bleed_px = mm_to_px(config.output.bleed_mm, dpi)
+    gap_bleed_px = min(bleed_px, mm_to_px(dims.flap.gap, dpi))
 
     # Warn upfront about multi-module slots that have coverage gaps for the
     # modules this job will process.  (Explicit blank segments count as
@@ -564,12 +575,12 @@ def render_job(
 
             # Generate front image
             front_img = generate_batch_image(front_batch, dims.flap, dims.jig, dims.printable, dpi,
-                                             spool_at_bottom=True)
+                                             spool_at_bottom=True, gap_bleed_px=gap_bleed_px)
 
             # Reorder back-side flaps to their post-jig-flip grid positions.
             reordered_back = reorder_for_jig_flip(back_batch, dims.jig, back_build_flip)
             back_img = generate_batch_image(reordered_back, dims.flap, dims.jig, dims.printable, dpi,
-                                            spool_at_bottom=False)
+                                            spool_at_bottom=False, gap_bleed_px=gap_bleed_px)
 
             # Apply ink-saving mask
             if mask_on:

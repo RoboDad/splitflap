@@ -90,6 +90,7 @@ def generate_batch_image(
     printable: PrintableAreaDimensions,
     dpi: float,
     spool_at_bottom: bool = True,
+    gap_bleed_px: int = 0,
 ) -> Image.Image:
     """Arrange up to jig.flaps_per_batch flap images on a printable-area-sized canvas.
 
@@ -110,6 +111,12 @@ def generate_batch_image(
     have their spool edges facing right (matching the jig pockets) and
     their outer-edge bleed extending left of the pocket; back sheets are
     the reverse.
+
+    *gap_bleed_px* — how much of each image's along-X extra size is
+    gap-edge bleed (on the spool side), the remainder being outer-edge
+    bleed (on the display side).  Blanks and other images without the
+    extra rows are unaffected (the per-image amount is capped by what the
+    image actually carries).
 
     Returns an RGBA image at the correct physical size for the given DPI.
     """
@@ -146,16 +153,21 @@ def generate_batch_image(
 
         # Bleed amounts are encoded in the image dimensions vs the pocket
         # size.  After rotation the pocket occupies flap_h_px along X and
-        # flap_w_px along Y within the image.
-        bleed_x = max(0, img.width - flap_h_px)          # outer-edge bleed (upright top)
+        # flap_w_px along Y within the image.  The along-X extra splits into
+        # gap-edge bleed (spool side) and outer-edge bleed (display side).
+        extra_x = max(0, img.width - flap_h_px)
+        gap_x = min(gap_bleed_px, extra_x)               # gap-edge bleed (spool side)
+        outer_x = extra_x - gap_x                        # outer-edge bleed (display side)
         bleed_y_total = max(0, img.height - flap_w_px)   # side bleed, centred on the pocket
 
         if spool_at_bottom:
-            # Front: outer display edge faces left — bleed extends left of pocket
-            paste_x = pocket_x - bleed_x
+            # Front: display edge faces left, spool/gap edge right —
+            # outer bleed extends left of the pocket, gap bleed right
+            paste_x = pocket_x - outer_x
         else:
-            # Back: outer display edge faces right — bleed extends right of pocket
-            paste_x = pocket_x
+            # Back: display edge faces right, spool/gap edge left —
+            # gap bleed extends left of the pocket, outer bleed right
+            paste_x = pocket_x - gap_x
         # Side bleed is centred; an odd leftover pixel goes below the pocket
         # (the upright frame centres with the leftover on its left edge,
         # which the CCW rotation maps to the sheet bottom).

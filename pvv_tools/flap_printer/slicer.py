@@ -14,6 +14,7 @@ def slice_display_image(
     flap: FlapDimensions,
     dpi: float,
     bleed_y: int = 0,
+    gap_bleed_px: int = 0,
 ) -> tuple[Image.Image, Image.Image]:
     """Split a full-character display image into top and bottom halves.
 
@@ -24,20 +25,31 @@ def slice_display_image(
     returned halves preserve those outer bleed rows so the physical pocket
     area is centred within each half.
 
-    Returns (top_half, bottom_half) as RGBA images.
-    The gap strip in the centre is discarded.
+    When *gap_bleed_px* > 0, each half additionally keeps that many rows of
+    the adjacent gap-strip content on its gap-side edge (capped at the gap
+    height).  This is gap-edge bleed: the true continuation of the artwork
+    past the cut line, so a slight print-vs-flap misalignment doesn't
+    expose unprinted flap stock at the gap.  Unlike outer-edge bleed it
+    requires no fit expansion or scaling — the rows already exist in the
+    display image and would otherwise be discarded.
+
+    Returns (top_half, bottom_half) as RGBA images:
+      top half rows:    [bleed_y outer][flap_height][gap_bleed]
+      bottom half rows: [gap_bleed][flap_height][bleed_y outer]
+    The rest of the gap strip is discarded.
     """
     image = image.convert('RGBA')
 
     top_px = mm_to_px(flap.height, dpi)
     gap_px = mm_to_px(flap.gap, dpi)
+    gb = max(0, min(gap_bleed_px, gap_px))
     w = image.width
 
-    # Top half: rows 0..(top_px + bleed_y) — outer top bleed preserved
-    top_half = image.crop((0, 0, w, top_px + bleed_y))
-    # Bottom half: rows after the gap to end — outer bottom bleed preserved
+    # Top half: outer top bleed + pocket + gap-side bleed
+    top_half = image.crop((0, 0, w, top_px + bleed_y + gb))
+    # Bottom half: gap-side bleed + pocket + outer bottom bleed
     bottom_start = top_px + bleed_y + gap_px
-    bottom_half = image.crop((0, bottom_start, w, bottom_start + top_px + bleed_y))
+    bottom_half = image.crop((0, bottom_start - gb, w, bottom_start + top_px + bleed_y))
 
     return top_half, bottom_half
 
