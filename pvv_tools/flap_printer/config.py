@@ -61,9 +61,20 @@ class JigConfig:
     printable_size_y_mm: float = 88.0
     printable_origin_x_mm: float = 4.0
     printable_origin_y_mm: float = 5.0
-    # Insert lower-left corner — absolute coordinates on the mat
+    # Insert lower-left corner — absolute coordinates on the mat.  With
+    # multiple insert rows this is the FIRST insert; subsequent rows repeat
+    # at insert_pitch_y_mm intervals along +Y.
     insert_origin_x_mm: float = 20.5
     insert_origin_y_mm: float = 16.0
+    # Insert rows: the standard flatbed stacks several identical insert
+    # jigs along Y (each flipped individually for the back pass).  The
+    # minibed has a single row.
+    insert_rows: int = 1
+    insert_pitch_y_mm: Optional[float] = None   # required when insert_rows > 1
+    # Per-jig overrides of output.calibration_offset_mm / output.canvas_size_mm
+    # (zero-point error and Studio canvas are properties of the bed, not the job)
+    calibration_offset_mm: Optional[tuple[float, float]] = None
+    canvas_size_mm: Optional[tuple[float, float]] = None
     # Laser kerf compensations (mm)
     laser_kerf_mm: float = 0.04
     insert_kerf_mm: float = 0.04
@@ -89,7 +100,7 @@ class OutputConfig:
     # Optional (width_mm, height_mm) override for the output image canvas.
     # When set, the canvas is treated as the eufyMake Studio mat working canvas
     # (origin = mat zero-point), and the jig insert is placed at absolute mat
-    # coordinates from SCAD (minibed_insert_origin_x/y).  Use this to match
+    # coordinates from SCAD (flatbed_insert_origin_x/y).  Use this to match
     # eufyMake Studio's reported canvas size (e.g. [90, 335]) without
     # touching the physical jig dimensions.  Leave unset to use the SCAD
     # printable-area size.
@@ -140,12 +151,36 @@ class GlobalTransforms:
 
 
 @dataclass
+class FlapSegment:
+    """One module-range span of a multi-module flap.
+
+    A multi-module flap is stitched from one or more segments, each covering
+    an inclusive [start, end] module range with its own source image.
+    Per-segment transform overrides fall back to the owning CustomFlap's
+    values, then to the global defaults.  Segment ranges within one flap
+    must not overlap; modules the job processes that no segment covers
+    render as blanks (with a warning).
+    """
+    module_range: tuple[int, int]       # inclusive [start, end]
+    source: Optional[str] = None        # image file path; None only when blank=True
+    blank: bool = False                 # True → this range renders transparent (silences the gap warning)
+    scale: Optional[tuple[float, float]] = None
+    crop: Optional[tuple[float, float, float, float]] = None
+    fit_mode: Optional[str] = None
+    notch_mode: Optional[tuple[str, str]] = None
+    offset_mm: Optional[tuple[float, float]] = None
+
+    # Resolved at load time
+    source_path: Optional[Path] = None
+
+
+@dataclass
 class CustomFlap:
-    slot: int                           # 0-based index within the custom flap sequence
+    slot: int                           # 0-based index within the custom flap sequence; must be unique
     label: str                          # e.g. "EP42"
     source: Optional[str] = None        # image file path (resolved relative to config dir); None for blank
     type: str = "single"                # "single" | "multi-module" | "blank"
-    module_range: Optional[tuple[int, int]] = None  # inclusive [start, end] for multi-module
+    module_range: Optional[tuple[int, int]] = None  # multi-module: overall [start, end] span across segments
     scale: Optional[tuple[float, float]] = None
     crop: Optional[tuple[float, float, float, float]] = None  # (left%, top%, right%, bottom%)
     fit_mode: Optional[str] = None    # per-image override; None = use global default
@@ -155,8 +190,21 @@ class CustomFlap:
     offset_mm: Optional[tuple[float, float]] = None  # [dx_mm, dy_mm] shift applied after fit, before slicing
     enabled: bool = True  # False → output is 100% transparent; slot position preserved
 
+    # Multi-module only: the module-range segments this flap is stitched from.
+    # A flat entry (source + module_range directly on the entry) is normalised
+    # to a single segment at load time.
+    segments: Optional[list[FlapSegment]] = None
+
     # Resolved at load time
     source_path: Optional[Path] = None
+
+    def segment_for_module(self, module_index: int) -> Optional[FlapSegment]:
+        """Return the segment covering *module_index*, or None."""
+        if self.segments:
+            for seg in self.segments:
+                if seg.module_range[0] <= module_index <= seg.module_range[1]:
+                    return seg
+        return None
 
 
 @dataclass
@@ -192,14 +240,14 @@ class DimensionOverrides:
         'flap_notch_height': 'flap_notch_height_default',
         'flap_notch_depth': 'flap_notch_depth',
         'flap_pin_width': 'flap_pin_width',
-        'jig_num_x': 'minibed_flap_jig_num_flaps_x',
-        'jig_num_y': 'minibed_flap_jig_num_flaps_y',
-        'jig_gap_x': 'minibed_flap_jig_gap_x',
-        'jig_gap_y': 'minibed_flap_jig_gap_y',
-        'jig_margin_x': 'minibed_flap_jig_margin_x',
-        'jig_margin_y': 'minibed_flap_jig_margin_y',
-        'printable_width': 'minibed_printable_size_x',
-        'printable_height': 'minibed_printable_size_y',
+        'jig_num_x': 'flatbed_flap_jig_num_flaps_x',
+        'jig_num_y': 'flatbed_flap_jig_num_flaps_y',
+        'jig_gap_x': 'flatbed_flap_jig_gap_x',
+        'jig_gap_y': 'flatbed_flap_jig_gap_y',
+        'jig_margin_x': 'flatbed_flap_jig_margin_x',
+        'jig_margin_y': 'flatbed_flap_jig_margin_y',
+        'printable_width': 'flatbed_printable_size_x',
+        'printable_height': 'flatbed_printable_size_y',
     }
 
     def as_dict(self) -> dict[str, float]:
@@ -215,15 +263,28 @@ class DimensionOverrides:
 @dataclass
 class JobConfig:
     display: DisplayConfig = field(default_factory=DisplayConfig)
-    jig: JigConfig = field(default_factory=JigConfig)
+    jig: JigConfig = field(default_factory=JigConfig)   # the ACTIVE jig
     output: OutputConfig = field(default_factory=OutputConfig)
     preview: PreviewConfig = field(default_factory=PreviewConfig)
     global_transforms: GlobalTransforms = field(default_factory=GlobalTransforms)
     custom_flaps: list[CustomFlap] = field(default_factory=list)
     dimensions: DimensionOverrides = field(default_factory=DimensionOverrides)
 
+    # All jig definitions from the job file ("jigs" map, or the single "jig"
+    # section under the name "default"), plus the active selection.
+    jigs: dict[str, JigConfig] = field(default_factory=dict)
+    active_jig: str = "default"
+
     # Metadata
     config_dir: Path = field(default_factory=lambda: Path('.'))
+
+    def select_jig(self, name: str) -> None:
+        """Switch the active jig (e.g. from the --jig CLI flag)."""
+        if name not in self.jigs:
+            raise ValueError(
+                f"Unknown jig {name!r} (job file defines: {', '.join(sorted(self.jigs))})")
+        self.active_jig = name
+        self.jig = self.jigs[name]
 
 # ---------------------------------------------------------------------------
 # Loader
@@ -275,6 +336,50 @@ def _parse_notch_mode(raw, field_name: str) -> tuple[str, str]:
         f"{field_name}: notch_mode must be a string or [left, right] list, got: {raw!r}")
 
 
+def _parse_segment(seg_raw: dict, config_dir: Path, ctx: str) -> FlapSegment:
+    """Parse one multi-module segment dict (also used for the flat form)."""
+    mr = seg_raw.get('module_range')
+    if mr is None or len(mr) != 2:
+        raise ValueError(f"{ctx}: 'module_range' is required and must be [start, end]")
+    start, end = int(mr[0]), int(mr[1])
+    if start > end:
+        raise ValueError(f"{ctx}: module_range start ({start}) > end ({end})")
+
+    blank = bool(seg_raw.get('blank', False))
+    source = seg_raw.get('source')
+    source_path: Optional[Path] = None
+    if blank:
+        if source is not None:
+            logger.warning("%s: 'source' ignored for blank segment", ctx)
+            source = None
+    else:
+        if source is None:
+            raise ValueError(f"{ctx}: 'source' is required (or set \"blank\": true)")
+        source_path = Path(source)
+        if not source_path.is_absolute():
+            source_path = config_dir / source_path
+
+    fit_mode = seg_raw.get('fit_mode')
+    if fit_mode is not None and fit_mode not in VALID_FIT_MODES:
+        raise ValueError(f"{ctx}: invalid fit_mode {fit_mode!r} (expected one of {VALID_FIT_MODES})")
+
+    scale = seg_raw.get('scale')
+    crop = seg_raw.get('crop')
+    return FlapSegment(
+        module_range=(start, end),
+        source=source,
+        blank=blank,
+        scale=tuple(scale) if scale else None,
+        crop=tuple(crop) if crop else None,
+        fit_mode=fit_mode,
+        notch_mode=_parse_notch_mode(seg_raw['notch_mode'], f"{ctx}.notch_mode")
+                   if seg_raw.get('notch_mode') is not None else None,
+        offset_mm=_parse_offset(seg_raw['offset_mm'], f"{ctx}.offset_mm")
+                  if seg_raw.get('offset_mm') is not None else None,
+        source_path=source_path,
+    )
+
+
 def _load_preview(raw: dict) -> PreviewConfig:
     """Parse the optional 'preview' section from the job config dict."""
     pv = raw.get('preview', {})
@@ -317,46 +422,96 @@ def load_config(path: str | Path) -> JobConfig:
         inter_module_gap_mm=_get(d, 'inter_module_gap_mm', 10.0),
     )
 
-    # Jig section
-    j = raw.get('jig', {})
-    if 'output_orientation' in j:
-        logger.warning(
-            "jig.output_orientation is obsolete and ignored — output images "
-            "are always in printer orientation (long axis along X)")
-    jig = JigConfig(
-        type=_get(j, 'type', 'minibed'),
-        flip_mode=_get(j, 'flip_mode', 'front-back'),
-        num_flaps_x=int(_get(j, 'num_flaps_x', 6)),
-        num_flaps_y=int(_get(j, 'num_flaps_y', 1)),
-        gap_x_mm=float(_get(j, 'gap_x_mm', 6.0)),
-        gap_y_mm=float(_get(j, 'gap_y_mm', 6.0)),
-        margin_x_mm=float(_get(j, 'margin_x_mm', 6.0)),
-        margin_y_mm=float(_get(j, 'margin_y_mm', 6.0)),
-        printable_size_x_mm=float(_get(j, 'printable_size_x_mm', 333.0)),
-        printable_size_y_mm=float(_get(j, 'printable_size_y_mm', 88.0)),
-        printable_origin_x_mm=float(_get(j, 'printable_origin_x_mm', 4.0)),
-        printable_origin_y_mm=float(_get(j, 'printable_origin_y_mm', 5.0)),
-        insert_origin_x_mm=float(_get(j, 'insert_origin_x_mm', 20.5)),
-        insert_origin_y_mm=float(_get(j, 'insert_origin_y_mm', 16.0)),
-        laser_kerf_mm=float(_get(j, 'laser_kerf_mm', 0.04)),
-        insert_kerf_mm=float(_get(j, 'insert_kerf_mm', 0.04)),
-        mat_size_x_mm=float(_get(j, 'mat_size_x_mm', 370.0)),
-        mat_size_y_mm=float(_get(j, 'mat_size_y_mm', 97.0)),
-        mat_corner_radius_mm=float(_get(j, 'mat_corner_radius_mm', 7.5)),
-        mat_corner_cut_mm=float(_get(j, 'mat_corner_cut_mm', 22.0)),
-        reg_mark_size_mm=float(_get(j, 'reg_mark_size_mm', 6.0)),
-        reg_mark_stroke_mm=float(_get(j, 'reg_mark_stroke_mm', 1.0)),
-    )
-    if jig.flip_mode not in ('left-right', 'front-back'):
-        raise ValueError(f"Invalid flip_mode: {jig.flip_mode!r} (expected 'left-right' or 'front-back')")
-    if jig.printable_size_x_mm < jig.printable_size_y_mm:
-        logger.warning(
-            "jig.printable_size_x_mm (%g) < printable_size_y_mm (%g) — this "
-            "looks like a job file in the old rotated convention.  Jig "
-            "coordinates are now in printer orientation: the long axis runs "
-            "along X (e.g. printable area 333 x 88).  Swap the jig section's "
-            "x/y values.",
-            jig.printable_size_x_mm, jig.printable_size_y_mm)
+    # Jig section(s): either a single "jig" object, or a "jigs" map of named
+    # definitions plus "active_jig" selecting one (overridable via --jig).
+    def _load_jig(j: dict, ctx: str) -> JigConfig:
+        if 'output_orientation' in j:
+            logger.warning(
+                "%s.output_orientation is obsolete and ignored — output images "
+                "are always in printer orientation (long axis along X)", ctx)
+        cal_raw = _get(j, 'calibration_offset_mm', None)
+        canvas_raw = _get(j, 'canvas_size_mm', None)
+        if canvas_raw is not None and len(canvas_raw) != 2:
+            raise ValueError(f"{ctx}.canvas_size_mm must be [width_mm, height_mm]")
+        pitch_raw = _get(j, 'insert_pitch_y_mm', None)
+        jig = JigConfig(
+            type=_get(j, 'type', 'minibed'),
+            flip_mode=_get(j, 'flip_mode', 'front-back'),
+            num_flaps_x=int(_get(j, 'num_flaps_x', 6)),
+            num_flaps_y=int(_get(j, 'num_flaps_y', 1)),
+            gap_x_mm=float(_get(j, 'gap_x_mm', 6.0)),
+            gap_y_mm=float(_get(j, 'gap_y_mm', 6.0)),
+            margin_x_mm=float(_get(j, 'margin_x_mm', 6.0)),
+            margin_y_mm=float(_get(j, 'margin_y_mm', 6.0)),
+            printable_size_x_mm=float(_get(j, 'printable_size_x_mm', 333.0)),
+            printable_size_y_mm=float(_get(j, 'printable_size_y_mm', 88.0)),
+            printable_origin_x_mm=float(_get(j, 'printable_origin_x_mm', 4.0)),
+            printable_origin_y_mm=float(_get(j, 'printable_origin_y_mm', 5.0)),
+            insert_origin_x_mm=float(_get(j, 'insert_origin_x_mm', 20.5)),
+            insert_origin_y_mm=float(_get(j, 'insert_origin_y_mm', 16.0)),
+            insert_rows=int(_get(j, 'insert_rows', 1)),
+            insert_pitch_y_mm=float(pitch_raw) if pitch_raw is not None else None,
+            calibration_offset_mm=_parse_offset(cal_raw, f'{ctx}.calibration_offset_mm')
+                                  if cal_raw is not None else None,
+            canvas_size_mm=(float(canvas_raw[0]), float(canvas_raw[1]))
+                           if canvas_raw is not None else None,
+            laser_kerf_mm=float(_get(j, 'laser_kerf_mm', 0.04)),
+            insert_kerf_mm=float(_get(j, 'insert_kerf_mm', 0.04)),
+            mat_size_x_mm=float(_get(j, 'mat_size_x_mm', 370.0)),
+            mat_size_y_mm=float(_get(j, 'mat_size_y_mm', 97.0)),
+            mat_corner_radius_mm=float(_get(j, 'mat_corner_radius_mm', 7.5)),
+            mat_corner_cut_mm=float(_get(j, 'mat_corner_cut_mm', 22.0)),
+            reg_mark_size_mm=float(_get(j, 'reg_mark_size_mm', 6.0)),
+            reg_mark_stroke_mm=float(_get(j, 'reg_mark_stroke_mm', 1.0)),
+        )
+        if jig.flip_mode not in ('left-right', 'front-back'):
+            raise ValueError(f"{ctx}: invalid flip_mode {jig.flip_mode!r} "
+                             f"(expected 'left-right' or 'front-back')")
+        if jig.insert_rows < 1:
+            raise ValueError(f"{ctx}: insert_rows must be >= 1")
+        if jig.insert_rows > 1:
+            if jig.insert_pitch_y_mm is None:
+                raise ValueError(f"{ctx}: insert_pitch_y_mm is required when insert_rows > 1")
+            last_top = (jig.insert_origin_y_mm - jig.printable_origin_y_mm
+                        + (jig.insert_rows - 1) * jig.insert_pitch_y_mm
+                        + jig.margin_y_mm * 2 + 54.0)  # + insert height (flap width + margins)
+            if last_top > jig.printable_size_y_mm + 1e-6:
+                logger.warning(
+                    "%s: %d insert rows at pitch %g mm extend past the printable "
+                    "area (%g mm)", ctx, jig.insert_rows, jig.insert_pitch_y_mm,
+                    jig.printable_size_y_mm)
+        if jig.printable_size_x_mm < jig.printable_size_y_mm and jig.insert_rows == 1:
+            logger.warning(
+                "%s.printable_size_x_mm (%g) < printable_size_y_mm (%g) — this "
+                "looks like a job file in the old rotated convention.  Jig "
+                "coordinates are now in printer orientation: the long axis runs "
+                "along X (e.g. printable area 333 x 88).  Swap the jig section's "
+                "x/y values.",
+                ctx, jig.printable_size_x_mm, jig.printable_size_y_mm)
+        return jig
+
+    if 'jigs' in raw:
+        if 'jig' in raw:
+            raise ValueError("Use either 'jig' or 'jigs' in the job file, not both")
+        raw_jigs = raw['jigs']
+        if not isinstance(raw_jigs, dict) or not raw_jigs:
+            raise ValueError("'jigs' must be a non-empty object of named jig definitions")
+        jigs = {name: _load_jig(jd, f"jigs.{name}") for name, jd in raw_jigs.items()}
+        active = raw.get('active_jig')
+        if active is None:
+            if len(jigs) == 1:
+                active = next(iter(jigs))
+            else:
+                raise ValueError(
+                    f"'active_jig' is required when 'jigs' defines more than one jig "
+                    f"(available: {', '.join(sorted(jigs))})")
+        if active not in jigs:
+            raise ValueError(
+                f"active_jig {active!r} not found in 'jigs' (available: {', '.join(sorted(jigs))})")
+    else:
+        jigs = {'default': _load_jig(raw.get('jig', {}), 'jig')}
+        active = 'default'
+    jig = jigs[active]
 
     # Output section
     o = raw.get('output', {})
@@ -476,21 +631,61 @@ def load_config(path: str | Path) -> JobConfig:
                 ep_char_resolved = _FLAP_CHARACTER_LIST[ep_index]
                 cf['label'] = f"{glyph_font[:3]}-{ep_char_resolved!r}" if ep_char_resolved.strip() else f"{glyph_font[:3]}-SP"
 
-        # 'source' is required for non-blank types
+        # Multi-module entries carry their sources in segments; other types
+        # use an entry-level source.
+        segments: Optional[list[FlapSegment]] = None
         source_str: Optional[str] = cf.get('source')
         source_path: Optional[Path] = None
-        if flap_type == 'blank':
-            if source_str is not None:
-                logger.warning("custom_flaps[%d]: 'source' ignored for blank type", i)
-                source_str = None
-        else:
-            if source_str is None:
-                raise ValueError(f"custom_flaps[{i}]: 'source' is required for type '{flap_type}'")
-            source_path = Path(source_str)
-            if not source_path.is_absolute():
-                source_path = config_dir / source_path
+        module_range: Optional[tuple[int, int]] = None
 
-        mr = cf.get('module_range')
+        if flap_type == 'multi-module':
+            if cf.get('segments') is not None:
+                if source_str is not None or cf.get('module_range') is not None:
+                    raise ValueError(
+                        f"custom_flaps[{i}]: use either 'segments' or flat "
+                        f"'source' + 'module_range', not both")
+                raw_segs = cf['segments']
+                if not isinstance(raw_segs, list) or not raw_segs:
+                    raise ValueError(f"custom_flaps[{i}]: 'segments' must be a non-empty list")
+                segments = [_parse_segment(s, config_dir, f"custom_flaps[{i}].segments[{k}]")
+                            for k, s in enumerate(raw_segs)]
+                source_str = None
+            else:
+                # Flat form: source + module_range on the entry → one segment
+                if cf.get('module_range') is None:
+                    raise ValueError(
+                        f"custom_flaps[{i}]: 'module_range' (or 'segments') is "
+                        f"required for multi-module type")
+                segments = [_parse_segment(
+                    {'module_range': cf['module_range'], 'source': source_str},
+                    config_dir, f"custom_flaps[{i}]")]
+            segments.sort(key=lambda s: s.module_range[0])
+            for a, b in zip(segments, segments[1:]):
+                if b.module_range[0] <= a.module_range[1]:
+                    raise ValueError(
+                        f"custom_flaps[{i}]: segment module_ranges overlap: "
+                        f"{list(a.module_range)} and {list(b.module_range)}")
+            module_range = (segments[0].module_range[0], segments[-1].module_range[1])
+        else:
+            if cf.get('segments') is not None:
+                raise ValueError(f"custom_flaps[{i}]: 'segments' is only valid for multi-module type")
+            if cf.get('module_range') is not None:
+                raise ValueError(
+                    f"custom_flaps[{i}]: 'module_range' is only valid for multi-module "
+                    f"type (for a partial-range blank, use a multi-module entry with a "
+                    f"blank segment)")
+            # 'source' is required for non-blank types
+            if flap_type == 'blank':
+                if source_str is not None:
+                    logger.warning("custom_flaps[%d]: 'source' ignored for blank type", i)
+                    source_str = None
+            else:
+                if source_str is None:
+                    raise ValueError(f"custom_flaps[{i}]: 'source' is required for type '{flap_type}'")
+                source_path = Path(source_str)
+                if not source_path.is_absolute():
+                    source_path = config_dir / source_path
+
         scale = cf.get('scale')
         crop = cf.get('crop')
 
@@ -499,7 +694,7 @@ def load_config(path: str | Path) -> JobConfig:
             label=cf.get('label', f"EP{cf['slot'] + 42:02d}"),
             source=source_str,
             type=flap_type,
-            module_range=tuple(mr) if mr else None,
+            module_range=module_range,
             scale=tuple(scale) if scale else None,
             crop=tuple(crop) if crop else None,
             fit_mode=cf.get('fit_mode', None),
@@ -507,6 +702,7 @@ def load_config(path: str | Path) -> JobConfig:
             bleed=bool(cf.get('bleed', cf.get('type', 'single') in ('single', 'multi-module'))),
             offset_mm=_parse_offset(cf['offset_mm'], f'custom_flaps[{i}].offset_mm') if cf.get('offset_mm') is not None else None,
             enabled=bool(cf.get('enabled', True)),
+            segments=segments,
             source_path=source_path,
         )
 
@@ -514,10 +710,18 @@ def load_config(path: str | Path) -> JobConfig:
             raise ValueError(f"custom_flaps[{i}]: invalid fit_mode {flap.fit_mode!r} (expected one of {VALID_FIT_MODES})")
         # notch_mode is already validated by _parse_notch_mode at load time
 
-        if flap.type == 'multi-module' and flap.module_range is None:
-            raise ValueError(f"custom_flaps[{i}]: 'module_range' is required for multi-module type")
-
         custom_flaps.append(flap)
+
+    # Slots must be unique: one entry per physical flap position.
+    seen_slots: dict[int, int] = {}
+    for idx, flap in enumerate(custom_flaps):
+        if flap.slot in seen_slots:
+            raise ValueError(
+                f"custom_flaps[{idx}]: duplicate slot {flap.slot} (already used by "
+                f"custom_flaps[{seen_slots[flap.slot]}]). Each slot must appear exactly "
+                f"once; to stitch a multi-module flap from several images, use a "
+                f"'segments' list on one entry.")
+        seen_slots[flap.slot] = idx
 
     # Dimension overrides (optional fallbacks when OpenSCAD is unavailable)
     dim = raw.get('dimensions', {})
@@ -547,6 +751,8 @@ def load_config(path: str | Path) -> JobConfig:
         global_transforms=global_transforms,
         custom_flaps=custom_flaps,
         dimensions=dimensions,
+        jigs=jigs,
+        active_jig=active,
         config_dir=config_dir,
     )
 
@@ -560,7 +766,9 @@ def print_summary(config: JobConfig) -> None:
     print(f"  Display: {config.display.num_modules} modules, "
           f"pitch={config.display.module_pitch_mm}mm, "
           f"gap={config.display.inter_module_gap_mm}mm")
-    print(f"  Jig: {config.jig.type}, flip={config.jig.flip_mode}")
+    jig_name = f" '{config.active_jig}'" if len(config.jigs) > 1 else ""
+    rows_info = f", insert_rows={config.jig.insert_rows}" if config.jig.insert_rows > 1 else ""
+    print(f"  Jig: {config.jig.type}{jig_name}, flip={config.jig.flip_mode}{rows_info}")
     print(f"  Output: {config.output.dpi} DPI, format={config.output.format}, "
           f"bleed={config.output.bleed_mm}mm, mask={config.output.ink_save_mask}, "
           f"labels={config.output.labels}")
@@ -568,14 +776,27 @@ def print_summary(config: JobConfig) -> None:
     print(f"  Fit mode: {config.global_transforms.fit_mode} (global default)")
     print(f"  Custom flaps: {len(config.custom_flaps)}")
     for cf in config.custom_flaps:
-        mod_info = f", modules {cf.module_range[0]}-{cf.module_range[1]}" if cf.module_range else ""
+        fit_info = f", fit={cf.fit_mode}" if cf.fit_mode else ""
+        disabled_info = " [DISABLED]" if not cf.enabled else ""
+        if cf.type == "multi-module":
+            mod_info = f", modules {cf.module_range[0]}-{cf.module_range[1]}"
+            print(f"    [{cf.label}] slot={cf.slot}, type={cf.type}{mod_info}{fit_info}{disabled_info}:")
+            for seg in cf.segments or []:
+                if seg.blank:
+                    exists = "blank"
+                elif seg.source_path and seg.source_path.exists():
+                    exists = "OK"
+                else:
+                    exists = "MISSING"
+                seg_fit = f", fit={seg.fit_mode}" if seg.fit_mode else ""
+                print(f"      modules {seg.module_range[0]}-{seg.module_range[1]}{seg_fit}: "
+                      f"source={seg.source} ({exists})")
+            continue
         if cf.type == "blank":
             exists = "blank"
         elif cf.source_path and cf.source_path.exists():
             exists = "OK"
         else:
             exists = "MISSING"
-        fit_info = f", fit={cf.fit_mode}" if cf.fit_mode else ""
-        disabled_info = " [DISABLED]" if not cf.enabled else ""
-        print(f"    [{cf.label}] slot={cf.slot}, type={cf.type}{mod_info}{fit_info}{disabled_info}, "
+        print(f"    [{cf.label}] slot={cf.slot}, type={cf.type}{fit_info}{disabled_info}, "
               f"source={cf.source} ({exists})")

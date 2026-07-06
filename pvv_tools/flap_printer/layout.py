@@ -129,13 +129,16 @@ def generate_batch_image(
     # Pockets are rotated 90°: X extent = flap.height, Y extent = flap.width
     space_x_px = mm_to_px(flap.height + jig.gap_x, dpi)
     space_y_px = mm_to_px(flap.width + jig.gap_y, dpi)
+    row_pitch_px = mm_to_px(jig.row_pitch, dpi)
 
-    for i, fs in enumerate(flap_sides[:jig.flaps_per_batch]):
+    for i, fs in enumerate(flap_sides[:jig.flaps_per_sheet]):
         col = i % jig.num_x
-        row = i // jig.num_x
+        grid_row = i // jig.num_x
+        insert_idx = grid_row // jig.num_y     # which insert row (0 on the minibed)
+        pocket_row = grid_row % jig.num_y      # pocket row within the insert
 
         pocket_x = insert_x_px + margin_x_px + col * space_x_px
-        pocket_y = insert_y_px + margin_y_px + row * space_y_px
+        pocket_y = insert_y_px + insert_idx * row_pitch_px + margin_y_px + pocket_row * space_y_px
 
         # Rotate the upright image into the sheet frame: top edge → left,
         # spool edge → right.
@@ -265,6 +268,46 @@ def reorder_for_jig_flip(
             ))
 
     return filled
+
+
+def rotate_insert_rows_180(
+    image: Image.Image,
+    flap: FlapDimensions,
+    jig: JigDimensions,
+    printable: PrintableAreaDimensions,
+    dpi: float,
+) -> Image.Image:
+    """Rotate each insert-row region 180° in place (about its own centre).
+
+    A front-back (pancake) flip on a multi-row bed flips each INSERT
+    individually, not the whole sheet — so the back image for a front-back
+    job is the left-right back with every insert-row band rotated 180°
+    about its own centre.  On a single-row jig this is equivalent to
+    rotating the whole insert region (and, because the insert is centred
+    on the canvas, to rotating the whole sheet, which is what the
+    single-row path does).
+
+    All flap content (including bleed and labels) lies within the insert
+    bounds — bleed extends at most bleed_mm beyond a pocket and the insert
+    margins are larger — so band rotation moves everything that must move.
+
+    Returns a new image; does not mutate the input.
+    """
+    img = image.copy()
+    insert_w_mm, insert_h_mm = jig.insert_size(flap)
+    x0 = mm_to_px(printable.insert_offset_x, dpi)
+    x1 = x0 + mm_to_px(insert_w_mm, dpi)
+    insert_y_px = mm_to_px(printable.insert_offset_y, dpi)
+    insert_h_px = mm_to_px(insert_h_mm, dpi)
+    row_pitch_px = mm_to_px(jig.row_pitch, dpi)
+
+    for insert_idx in range(jig.rows):
+        y0 = insert_y_px + insert_idx * row_pitch_px
+        box = (x0, y0, x1, y0 + insert_h_px)
+        band = img.crop(box)
+        img.paste(band.transpose(Image.ROTATE_180), box)
+
+    return img
 
 
 def _arc_points(cx: float, cy: float, r: float,
@@ -435,13 +478,15 @@ def apply_ink_save_mask(
     # Rotate into the sheet frame (upright top edge → left, spool → right)
     tile = tile.transpose(Image.ROTATE_90)
 
-    for row in range(jig.num_y):
-        for col in range(jig.num_x):
-            pocket_x = insert_x_px + margin_x_px + col * space_x_px
-            pocket_y = insert_y_px + margin_y_px + row * space_y_px
-            # The tile's one extra inclusive-boundary pixel sits at its top
-            # after the CCW rotation, hence the additional -1 on Y.
-            mask.paste(tile, (pocket_x - bleed_px, pocket_y - bleed_px - 1), tile)
+    row_pitch_px = mm_to_px(jig.row_pitch, dpi)
+    for insert_idx in range(jig.rows):
+        for row in range(jig.num_y):
+            for col in range(jig.num_x):
+                pocket_x = insert_x_px + margin_x_px + col * space_x_px
+                pocket_y = insert_y_px + insert_idx * row_pitch_px + margin_y_px + row * space_y_px
+                # The tile's one extra inclusive-boundary pixel sits at its top
+                # after the CCW rotation, hence the additional -1 on Y.
+                mask.paste(tile, (pocket_x - bleed_px, pocket_y - bleed_px - 1), tile)
 
     # Apply mask: zero alpha outside flap shapes
     result = image.copy()

@@ -61,10 +61,21 @@ class JigDimensions:
     gap_y: float = 6.0            # mm between flap pockets vertically
     margin_x: float = 6.0         # mm margin around grid
     margin_y: float = 6.0         # mm margin around grid
+    # Insert rows: the standard flatbed stacks several identical inserts
+    # along Y at row_pitch intervals; each insert is flipped individually
+    # for the back pass.  The minibed is a single row.
+    rows: int = 1
+    row_pitch: float = 0.0        # mm, first-insert-origin to next-insert-origin (unused when rows == 1)
 
     @property
     def flaps_per_batch(self) -> int:
+        """Flaps in ONE insert (one physical flip unit)."""
         return self.num_x * self.num_y
+
+    @property
+    def flaps_per_sheet(self) -> int:
+        """Flaps in one print run (all insert rows)."""
+        return self.flaps_per_batch * self.rows
 
     def insert_size(self, flap: FlapDimensions) -> tuple[float, float]:
         """Return (width_mm, height_mm) of the jig insert in printer orientation.
@@ -92,8 +103,8 @@ class PrintableAreaDimensions:
     the insert).  The `*_origin_*` fields below are the raw absolute mat
     coordinates; they enable that override in cli.py.
     """
-    width: float = 333.0          # mm — canvas width  (defaults to minibed_printable_size_x)
-    height: float = 88.0          # mm — canvas height (defaults to minibed_printable_size_y)
+    width: float = 333.0          # mm — canvas width  (defaults to flatbed_printable_size_x)
+    height: float = 88.0          # mm — canvas height (defaults to flatbed_printable_size_y)
     insert_offset_x: float = 16.5 # mm — insert X within canvas
     insert_offset_y: float = 11.0 # mm — insert Y within canvas
     # Raw absolute mat coordinates; used when canvas is overridden
@@ -180,6 +191,8 @@ class AllDimensions:
                 gap_y=jig_config.gap_y_mm,
                 margin_x=jig_config.margin_x_mm,
                 margin_y=jig_config.margin_y_mm,
+                rows=jig_config.insert_rows,
+                row_pitch=jig_config.insert_pitch_y_mm or 0.0,
             )
             printable = PrintableAreaDimensions(
                 width=jig_config.printable_size_x_mm,
@@ -194,18 +207,18 @@ class AllDimensions:
         else:
             # Legacy: resolve jig + printable dims from SCAD echoes / overrides / defaults.
             jig = JigDimensions(
-                num_x=int(_get('minibed_flap_jig_num_flaps_x', 6)),
-                num_y=int(_get('minibed_flap_jig_num_flaps_y', 1)),
-                gap_x=_get('minibed_flap_jig_gap_x', 6.0),
-                gap_y=_get('minibed_flap_jig_gap_y', 6.0),
-                margin_x=_get('minibed_flap_jig_margin_x', 6.0),
-                margin_y=_get('minibed_flap_jig_margin_y', 6.0),
+                num_x=int(_get('flatbed_flap_jig_num_flaps_x', 6)),
+                num_y=int(_get('flatbed_flap_jig_num_flaps_y', 1)),
+                gap_x=_get('flatbed_flap_jig_gap_x', 6.0),
+                gap_y=_get('flatbed_flap_jig_gap_y', 6.0),
+                margin_x=_get('flatbed_flap_jig_margin_x', 6.0),
+                margin_y=_get('flatbed_flap_jig_margin_y', 6.0),
             )
             insert_w, insert_h = jig.insert_size(flap)
-            printable_w = _get('minibed_printable_size_x', 333.0)
-            printable_h = _get('minibed_printable_size_y', 88.0)
-            printable_origin_x = _get('minibed_printable_origin_x', 4.0)
-            printable_origin_y = _get('minibed_printable_origin_y', 5.0)
+            printable_w = _get('flatbed_printable_size_x', 333.0)
+            printable_h = _get('flatbed_printable_size_y', 88.0)
+            printable_origin_x = _get('flatbed_printable_origin_x', 4.0)
+            printable_origin_y = _get('flatbed_printable_origin_y', 5.0)
             insert_offset_x = (printable_w - insert_w) / 2.0
             insert_offset_y = (printable_h - insert_h) / 2.0
             insert_origin_x = insert_offset_x + printable_origin_x

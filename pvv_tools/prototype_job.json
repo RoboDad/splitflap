@@ -13,21 +13,45 @@
     "background_color": [40, 40, 40],
     "inter_cell_gap_mm": 10
   },
-  "jig": {
-    "type": "minibed",
-    "flip_mode": "front-back",
-    "num_flaps_x": 6,
-    "num_flaps_y": 1,
-    "gap_x_mm": 6,
-    "gap_y_mm": 6,
-    "margin_x_mm": 6,
-    "margin_y_mm": 6,
-    "printable_size_x_mm": 333,
-    "printable_size_y_mm": 88,
-    "printable_origin_x_mm": 4.0,
-    "printable_origin_y_mm": 5.0,
-    "insert_origin_x_mm": 20.5,
-    "insert_origin_y_mm": 16
+  "active_jig": "minibed",
+  "jigs": {
+    "minibed": {
+      "type": "minibed",
+      "flip_mode": "front-back",
+      "num_flaps_x": 6,
+      "num_flaps_y": 1,
+      "gap_x_mm": 6,
+      "gap_y_mm": 6,
+      "margin_x_mm": 6,
+      "margin_y_mm": 6,
+      "printable_size_x_mm": 333,
+      "printable_size_y_mm": 88,
+      "printable_origin_x_mm": 4.0,
+      "printable_origin_y_mm": 5.0,
+      "insert_origin_x_mm": 20.5,
+      "insert_origin_y_mm": 16,
+      "calibration_offset_mm": [1, 0]
+    },
+    "standard": {
+      "type": "standard",
+      "flip_mode": "front-back",
+      "num_flaps_x": 6,
+      "num_flaps_y": 1,
+      "gap_x_mm": 6,
+      "gap_y_mm": 6,
+      "margin_x_mm": 6,
+      "margin_y_mm": 6,
+      "printable_size_x_mm": 333,
+      "printable_size_y_mm": 418,
+      "printable_origin_x_mm": 4.0,
+      "printable_origin_y_mm": 11.0,
+      "insert_origin_x_mm": 20.5,
+      "insert_origin_y_mm": 25.0,
+      "insert_rows": 5,
+      "insert_pitch_y_mm": 81.0,
+      "mat_size_x_mm": 370,
+      "mat_size_y_mm": 440
+    }
   },
   "output": {
     "dpi": 508,
@@ -37,8 +61,7 @@
     "labels": false,
     "label_font_size_pt": 6,
     "output_dir": "prototype_output",
-    "registration_marks": false,
-    "calibration_offset_mm": [1, 0]
+    "registration_marks": false
   },
   "custom_flaps": [
     {"slot":  0, "label": "PVV42", "type": "epilogue", "char": "-"},
@@ -52,8 +75,10 @@
     {"slot":  8, "label": "PVV50", "type": "emoji", "name": "heart_eyes"},
     {"slot":  9, "label": "PVV51", "type": "single", "source": "assets/images/woodgathering.PNG", "notch_mode": "inset"},
     {"slot": 10, "type": "multi-module", "label": "SKY (52)", "source": "test_images/skyline.png",  "module_range": [0, 5]},
-    {"slot": 11, "type": "multi-module", "label": "TRI (53)", "source": "assets/images/WideBunnyTruck.PNG", "fit_mode": "fit", "module_range": [1, 2]},
-    {"slot": 11, "type": "multi-module", "label": "TRI (53)", "source": "assets/images/WideMoth.PNG", "fit_mode": "stretch", "module_range": [3, 5]},
-    {"slot": 11, "type": "multi-module", "label": "TRI (53)", "source": "assets/images/FrogAndElf.PNG", "fit_mode": "fit", "module_range": [0, 0]}
+    {"slot": 11, "type": "multi-module", "label": "TRI (53)", "fit_mode": "fit", "segments": [
+      {"module_range": [0, 0], "source": "assets/images/FrogAndElf.PNG"},
+      {"module_range": [1, 2], "source": "assets/images/WideBunnyTruck.PNG"},
+      {"module_range": [3, 5], "source": "assets/images/WideMoth.PNG", "fit_mode": "stretch"}
+    ]}
   ]
 }

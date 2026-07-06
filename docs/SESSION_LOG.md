@@ -552,3 +552,150 @@ matching the physical top-down view and the output print images.
 - `pvv_plans/flap_printer_plan.md` still uses the old terms — left as-is
   (historical planning record).
 - `prototype_job_v1.json` was also converted so it stays runnable.
+
+## 2026-07-05 - flap_printer: multi-module segments (one entry per slot)
+
+- **Model:** Claude Fable 5
+- **Commits:** none (uncommitted)
+- **Files touched:**
+  - `pvv_tools/flap_printer/config.py` (FlapSegment model, parsing, validation)
+  - `pvv_tools/flap_printer/renderer.py` (segment resolution; slot grouping removed)
+  - `pvv_tools/prototype_job.json` (slot 11 converted to segments)
+  - `pvv_tools/test_multimodule_job.json` (new: runnable coverage-gap test job)
+  - `pvv_tools/README.md` (custom_flaps table, Multi-Module Segments section)
+
+### Goal
+Replace the repeated-slot mechanism for stitched multi-module flaps (several
+`custom_flaps` entries sharing one slot, resolved by declaration order) with
+an explicit `segments` list on a single entry.  Approved as "Phase 0.5" of
+the standard-flatbed plan (pvv_plans work pending user measurements).
+
+### Changes
+- New `FlapSegment` dataclass: `module_range`, `source` (or `"blank": true`),
+  and per-segment `fit_mode`/`scale`/`crop`/`notch_mode`/`offset_mm`
+  overrides.  Fallback chain: segment -> entry -> global transforms.
+- Flat multi-module form (`source` + `module_range` on the entry) is
+  normalised to a single segment at load time; `cf.module_range` now holds
+  the overall span across segments.
+- Validation: duplicate slots are a hard error (with a pointer to
+  `segments`); overlapping segment ranges error; `module_range`/`segments`
+  on non-multi-module types error.  `_get_modules_to_process` enumerates
+  per segment, so inter-segment gaps do not pull in uncovered modules.
+- Renderer: `_group_flaps_by_slot` removed; `_resolve_flaps_for_module`,
+  `_collect_preview_entries`, and the upfront coverage warning now use
+  `CustomFlap.segment_for_module`.  Uncovered modules still render blanks
+  with the same `-blank` label and warning; explicit blank segments count
+  as coverage (no warning).  Dry-run summary prints one line per segment.
+
+### Verification
+- Byte-compare harness: rendered prototype_job (slot 11 in old repeated-slot
+  form) + a coverage-gap job BEFORE the refactor, re-rendered AFTER (slot 11
+  converted to `segments`; gap job in flat form): **38/38 files
+  byte-identical**, gap warning unchanged.
+- Exercised all new error paths (dup slot, overlapping segments,
+  module_range on single, segments+flat mix) and blank-segment warning
+  suppression.
+
+### Notes / decisions
+- Old repeated-slot form dropped cleanly (duplicate slot = error) rather
+  than deprecated — all job files are local and were converted in the same
+  change (user decision).
+- Preserved edge-case quirk for byte-compat: a disabled multi-module entry
+  still contributes a blank flap to the `common/` pass.
+- Minor intentional label change: a *disabled* multi-module flap at an
+  uncovered module now labels as `<label>` rather than `<label>-blank`
+  (content identical; labels-on edge case only).
+- The old `{"type": "blank", "module_range": ...}` same-slot filler trick is
+  replaced by `"blank": true` segments.
+
+## 2026-07-05 - flap_printer: eufyMake standard flatbed support (multi-row sheets)
+
+- **Model:** Claude Fable 5
+- **Commits:** none (uncommitted)
+- **Files touched:**
+  - `pvv_tools/flap_printer/config.py` (jigs map + active_jig; insert_rows /
+    insert_pitch_y_mm; per-jig calibration_offset_mm / canvas_size_mm)
+  - `pvv_tools/flap_printer/dimensions.py` (JigDimensions.rows / row_pitch /
+    flaps_per_sheet)
+  - `pvv_tools/flap_printer/layout.py` (pitch-aware pocket grid in batch
+    image + mask; rotate_insert_rows_180)
+  - `pvv_tools/flap_printer/labels.py` (pitch-aware pocket grid)
+  - `pvv_tools/flap_printer/renderer.py` (_render_sheets global-packing flow;
+    _finish_and_save shared finishing)
+  - `pvv_tools/flap_printer/cli.py` (--jig flag; per-jig canvas override)
+  - `pvv_tools/flap_printer/scad_writer.py` (insert_rows/pitch params; active
+    jig noted in the generated header)
+  - `pvv_cad/flap_printer_jigs.scad` (generalized for N insert rows: insert
+    profiles, flap pockets, and fingernail reliefs loop over rows)
+  - `pvv_cad/flap_printer_params.scad` (regenerated; +insert_rows/pitch vars)
+  - `pvv_tools/prototype_job.json` (jigs map: minibed + standard; minibed
+    calibration moved into its jig def)
+  - `pvv_tools/README.md` (jigs docs, Standard Flatbed Sheets section, --jig)
+
+### Goal
+Support the eufyMake standard flatbed: printable 333 x 418 mm (Zero Point
+mode), origin measured at mat (4, 11).  Same laser-cut insert as the minibed,
+5 rows stacked along Y; front-back flips are PER INSERT (each row flipped
+individually), not the whole bed.  Must not change minibed output.
+
+### Design
+- Job files can hold both jig definitions: `"jigs": {name: {...}}` +
+  `"active_jig"`, switchable per run via `--jig NAME`.  Single `"jig"` form
+  still accepted.  calibration_offset_mm and canvas_size_mm can live per-jig
+  (bed properties), falling back to the output section.
+- Row layout (proposed, config-driven): first insert at mat y=25,
+  pitch 81 mm -> 5 x 66 mm inserts with 15 mm webs and 14 mm symmetric
+  outer margins inside the 418 mm printable depth.
+- Multi-row jigs use GLOBAL PACKING: the sheet set is the complete physical
+  print job for the whole display, one flap per module x slot.  Covered
+  modules use their per-module sequence; uncovered modules use the
+  module-agnostic singles sequence (replacing the "print common/ once per
+  module" convention, which cannot survive packing).  Print each sheet once.
+  sheets_manifest.txt maps sheet/row/pocket -> flap label + module.
+- Back sheets: each row built with left-right semantics and (front-back
+  mode) rotated 180 deg about ITS OWN row centre (rotate_insert_rows_180) —
+  the per-insert flip geometry.  Single-row path keeps the whole-image
+  ROTATE_180 (equivalent for a centred single insert; byte-preserved).
+- Prototype job on the standard bed: 72 flaps (6 modules x 12) -> 3 sheets,
+  one print run each, vs 12 minibed runs.
+
+### Verification
+- Minibed: 38/38 output files byte-identical through all new machinery
+  (jigs map, per-jig calibration, shared _finish_and_save, pitch-aware grid).
+- Standard: rows 1/2 of sheet_01 (front AND back) proven PIXEL-IDENTICAL to
+  the verified minibed module_00 batch_01/02 insert bands (calibration
+  zeroed for the comparison; X geometry is shared between the beds).
+- Investigated residual diffs before zeroing calibration: entirely artifacts
+  of _apply_calibration_offset on the mini side (paste-with-self-mask
+  attenuates antialiased edge alpha quadratically and zeroes RGB under
+  alpha=0).  Pre-existing behaviour, physically irrelevant (<= 0.05 mm edge
+  fringe), NOT caused by the new code.  Noted for a possible future fix
+  (use Image.transform or offset() instead of paste for the calibration
+  shift).
+
+### SCAD (measurements received same session)
+- Standard mat outer Y measured at 440 mm; corner cut confirmed lower-right
+  (same as mini).  Printable 11..429 -> symmetric 11 mm Y margins.
+- flap_printer_jigs.scad generalized: `eufy_minibed_flap_jig_insert_profiles()`
+  cuts `minibed_insert_rows` inserts at `minibed_insert_pitch_y`; flap-pocket
+  and fingernail-relief loops likewise.  The single-insert cut path
+  (bGenInsertOnly=true) is unchanged — the same insert serves both beds.
+  To cut the standard outer jig: run the tool with `--jig standard` (writes
+  standard params), open jigs.scad, set bGenInsertOnly=false, export SVG.
+- Verified via OpenSCAD top-view renders: standard outer jig (370x440,
+  corner cut lower-right, 5 cutouts, reliefs, reg marks) and minibed outer
+  jig (unchanged with rows=1 params).
+- Renamed the `minibed_` variable/module prefix to `flatbed_` throughout
+  (params template, jigs.scad incl. `eufy_flatbed_*` modules, and the
+  legacy SCAD-echo fallback names in dimensions.py/config.py) — the params
+  file describes whichever bed is active, not just the mini.  User's
+  snapshot `pvv_cad/flap_printer_params_MINIBED_20260705.scad` left as-is
+  (old prefix; regenerate minibed params with a plain run instead of
+  swapping it in).
+- Committed params file left generated for the STANDARD bed (user request,
+  for cutting the standard outer jig); regenerate for the mini with a plain
+  run (active_jig = minibed).
+
+### Open items
+- Cut the standard outer jig; zero-point calibration print on the standard
+  bed (per-jig calibration_offset_mm slot is ready).

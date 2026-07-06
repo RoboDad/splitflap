@@ -74,6 +74,7 @@ options:
   --no-labels           Disable EP labels
   --no-mask             Disable ink-saving mask
   --flip-mode MODE      left-right | front-back (default: left-right)
+  --jig NAME            Select a jig from the job file's "jigs" map (overrides active_jig)
   --print-size W H      Override output size in mm
   --dry-run             Validate config, print summary
   --verbose, -v         Verbose logging
@@ -95,16 +96,33 @@ See `example_job.json` for a complete example. The config has five sections:
 | `module_pitch_mm` | float | `64.0` | Center-to-center distance between modules (mm) |
 | `inter_module_gap_mm` | float | `10.0` | Gap between adjacent module frames (mm) |
 
-### `jig` — Print jig settings
+### `jig` / `jigs` — Print jig settings
 
 All jig coordinates are in **printer orientation** — exactly as the jig sits
-on the eufyMake E1 Mini Flatbed, viewed from above.  The mat's long axis runs
+on the eufyMake E1 flatbed, viewed from above.  The mat's long axis runs
 along X (left/right), and the mat zero-point corner (the one with the
 diagonal corner cut) is at the bottom-right.  The OpenSCAD model
 (`pvv_cad/flap_printer_jigs.scad`), the output print images, and the physical
 flatbed all share this one frame.  Flap pockets sit rotated 90° in the jig —
-spool/notch edge facing right, toward the zero point — in a single row along
-X, so a pocket's X extent is `flap_height` and its Y extent is `flap_width`.
+spool/notch edge facing right, toward the zero point — in rows along X, so a
+pocket's X extent is `flap_height` and its Y extent is `flap_width`.
+
+A job file may define a single `"jig"` object, **or** a `"jigs"` map of named
+definitions plus `"active_jig"` selecting one (override per run with
+`--jig NAME`):
+
+```json
+"active_jig": "minibed",
+"jigs": {
+  "minibed":  { "type": "minibed",  "printable_size_y_mm": 88,  ... },
+  "standard": { "type": "standard", "printable_size_y_mm": 418,
+                "insert_rows": 5, "insert_pitch_y_mm": 81, ... }
+}
+```
+
+Both beds use the **same laser-cut insert jig**; the standard flatbed simply
+stacks 5 of them in rows along Y (see [Standard Flatbed
+Sheets](#standard-flatbed-sheets)).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -120,8 +138,12 @@ X, so a pocket's X extent is `flap_height` and its Y extent is `flap_width`.
 | `printable_size_y_mm` | float | `88.0` | Depth of the printer's printable area along the short Y axis (mm). Used as the default canvas height. |
 | `printable_origin_x_mm` | float | `4.0` | X position of printable area's lower-left corner in mat absolute coordinates (mm) |
 | `printable_origin_y_mm` | float | `5.0` | Y position of printable area's lower-left corner in mat absolute coordinates (mm) |
-| `insert_origin_x_mm` | float | `20.5` | X position of insert's lower-left corner in mat absolute coordinates (mm) |
+| `insert_origin_x_mm` | float | `20.5` | X position of insert's lower-left corner in mat absolute coordinates (mm). With multiple insert rows, this is the first (top) insert. |
 | `insert_origin_y_mm` | float | `16.0` | Y position of insert's lower-left corner in mat absolute coordinates (mm) |
+| `insert_rows` | int | `1` | Number of identical insert jigs stacked along Y (5 on the standard flatbed). Each insert is flipped individually for the back pass. |
+| `insert_pitch_y_mm` | float | — | Y distance between successive insert origins (mm). Required when `insert_rows > 1`. |
+| `calibration_offset_mm` | `[dx, dy]` | — | Per-jig override of `output.calibration_offset_mm` — zero-point error is a property of the bed, so calibrate each jig here. |
+| `canvas_size_mm` | `[w, h]` | — | Per-jig override of `output.canvas_size_mm` (Camera-mode canvas differs per bed). |
 | `laser_kerf_mm` | float | `0.04` | Inward offset applied to each flap pocket when cutting the insert (tightens fit) |
 | `insert_kerf_mm` | float | `0.04` | Outward offset applied to the insert outline when cutting the outer jig (compensates laser kerf) |
 | `mat_size_x_mm` | float | `370.0` | eufyMake minibed mat outer length along X (mm) — hardware constant, rarely changed |
@@ -216,11 +238,12 @@ An array of objects, one per custom flap. Required fields: `slot`, `source`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `slot` | int | *required* | 0-based index in the custom flap sequence |
+| `slot` | int | *required* | 0-based index in the custom flap sequence. Must be **unique** — one entry per physical flap position (duplicate slots are a config error). |
 | `label` | string | `"EP{slot+42}"` | Display label (e.g. `"EP42"`) |
-| `source` | string | *required* (except `blank`, `glyph`, `emoji`, `epilogue`) | Image path (PNG/JPEG/SVG), relative to the JSON config file's directory |
+| `source` | string | *required* (except `blank`, `glyph`, `emoji`, `epilogue`, and `multi-module` with `segments`) | Image path (PNG/JPEG/SVG), relative to the JSON config file's directory |
 | `type` | string | `"single"` | `"single"`, `"multi-module"`, `"blank"`, `"glyph"`, `"emoji"`, or `"epilogue"` (see [Custom Flap Types](#custom-flap-types)) |
-| `module_range` | [int, int] | `null` | Required for `multi-module`: inclusive range `[start, end]` |
+| `module_range` | [int, int] | `null` | `multi-module` only: inclusive range `[start, end]` covered by the entry-level `source` (the flat, single-image form). Use `segments` instead to stitch several images. |
+| `segments` | list | `null` | `multi-module` only: list of `{module_range, source, ...}` objects stitching the flap from several images (see [Multi-Module Segments](#multi-module-segments)). Mutually exclusive with the flat `source` + `module_range` form. |
 | `index` | int | `null` | Required for `epilogue` if `char` is not given; 0-based index into the standard 52-flap character set |
 | `char` | string | `null` | Required for `epilogue` if `index` is not given; single character from the standard 52-flap set |
 | `scale` | [float, float] | `null` | Per-image scale override `[sx, sy]`; `null` = use global |
@@ -411,8 +434,10 @@ image is fit to the physical target size using the active `fit_mode`.
 - **`single`**: One image per flap. Same output for all modules. Source may
   be a raster (PNG/JPEG) or an `.svg` file (see [SVG Inputs](#svg-inputs)).
 - **`multi-module`**: Image spans multiple modules (e.g., triptych).
-  Requires `module_range: [start, end]` (inclusive). The tool extracts
-  the correct column for each module automatically. Raster or SVG.
+  Either the flat form — `source` + `module_range: [start, end]` (inclusive)
+  for a single image — or a `segments` list stitching several images (see
+  [Multi-Module Segments](#multi-module-segments)). The tool extracts the
+  correct column for each module automatically. Raster or SVG.
 - **`blank`**: Fully transparent top/bottom halves. No source required.
 - **`glyph`**: Resolves to a pre-rendered per-character SVG from
   `assets/flap_glyphs/<font>/`. Specify the font with `font` (default
@@ -449,6 +474,40 @@ image is fit to the physical target size using the active `fit_mode`.
 
   Source: Twemoji (Twitter/X), CC-BY 4.0 — covers Unicode 14.0 / ~3,600 emoji.
   See [Emoji downloader](#emoji-downloader-download_emojipypy).
+
+### Multi-Module Segments
+
+One multi-module flap (one slot) can be stitched from several source images,
+each covering its own module range, using a `segments` list:
+
+```json
+{"slot": 11, "type": "multi-module", "label": "TRI (53)", "fit_mode": "fit", "segments": [
+  {"module_range": [0, 0], "source": "assets/images/FrogAndElf.PNG"},
+  {"module_range": [1, 2], "source": "assets/images/WideBunnyTruck.PNG"},
+  {"module_range": [3, 5], "source": "assets/images/WideMoth.PNG", "fit_mode": "stretch"}
+]}
+```
+
+Rules and behavior:
+
+- Each segment requires `module_range: [start, end]` (inclusive) and a
+  `source` — or `"blank": true` to render that range transparent.
+- Segment ranges within one flap must **not overlap** (config error).
+  List order doesn't matter; segments are sorted by range at load time.
+- Per-segment `fit_mode`, `scale`, `crop`, `notch_mode`, and `offset_mm`
+  override the entry-level values, which in turn override the global
+  defaults (entry `"fit"` above; the last segment overrides to `"stretch"`).
+- Each segment's image is fit to *its own* span (e.g. `[1, 2]` spans two
+  module widths) and then sliced per module, exactly like a flat
+  multi-module entry covering that range.
+- Modules the job processes that no segment covers render as blanks and
+  log a warning; an explicit `"blank": true` segment covers the range
+  silently.
+- The flat form (`source` + `module_range` on the entry) is simply the
+  one-segment case; use one or the other, not both.
+
+See `test_multimodule_job.json` for a small runnable example including a
+coverage gap.
 
 ### SVG Inputs
 
@@ -584,12 +643,44 @@ output/
     └── batch_01_back.png
 ```
 
-Output images are sized to the full printable area (333 × 88 mm, in the same
-printer orientation as the jig) with the jig insert content centered at the
-computed offset, surrounded by transparent pixels. This enables **Zero Point
-Alignment** in eufymake studio.
+Output images are sized to the full printable area (333 × 88 mm on the
+minibed, in the same printer orientation as the jig) with the jig insert
+content centered at the computed offset, surrounded by transparent pixels.
+This enables **Zero Point Alignment** in eufymake studio.
 
 PNGs include DPI metadata so image editors show correct physical size.
+
+The `common/` + `module_NN/` structure above applies to single-row jigs
+(minibed): print each module directory's batches once per module, and the
+`common/` batches once per module not covered by any multi-module range.
+
+## Standard Flatbed Sheets
+
+When the active jig has `insert_rows > 1` (the standard flatbed), output
+switches to **globally packed sheets**: the sheet set is the complete
+physical print job for the whole display, one flap each — every module
+`0..num_modules-1` contributes its full flap sequence (modules covered by
+multi-module segments get their per-module sequence; uncovered modules get
+the module-agnostic singles sequence).  **Print every sheet exactly once** —
+there is no "repeat the common file" step.
+
+```
+output/
+├── sheet_01_front.png
+├── sheet_01_back.png
+├── sheet_02_front.png
+├── sheet_02_back.png
+└── sheets_manifest.txt   # pocket → flap label + module, per sheet/row
+```
+
+- Rows are numbered top-to-bottom in the print image; pockets left-to-right.
+  The manifest (and the on-print labels, if enabled) map every pocket to its
+  flap and module — recommended: keep `labels: true` for standard-bed runs.
+- **Back sheets are per-insert**: the operator flips each insert row
+  individually (front-back = pancake flip about the insert's own long axis).
+  The back image is generated accordingly — each row is reordered and
+  rotated about its own row centre, not the whole sheet.
+- `--modules M [M ...]` restricts packing to those modules' sequences.
 
 ## Dependencies
 
@@ -656,9 +747,11 @@ pvv_tools/
    4. Slices into top/bottom halves with `slicer.slice_display_image`
       (top `flap_height` mm + any top bleed, skip `flap_gap` mm, then
       `flap_height` mm + any bottom bleed).
-   5. For `multi-module`, the full multi-flap image is fit to the
-      combined span first (`module_pitch * num_span - inter_module_gap`),
-      then `slicer.extract_module_column` cuts out this module's column,
+   5. For `multi-module`, the segment covering the current module is
+      selected (flat entries are normalised to one segment at load time),
+      its image is fit to the segment's span
+      (`module_pitch * num_span - inter_module_gap`), then
+      `slicer.extract_module_column` cuts out this module's column,
       which is then re-fit to a single flap before slicing.
 4. **Flap-side mapping** (`layout.map_images_to_flap_sides`): Flap K's
    front is `top(K)`, its back is `bottom(K+1)`; the last back is blank.

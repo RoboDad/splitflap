@@ -18,26 +18,17 @@ except ImportError:
 from .config import JobConfig, CustomFlap
 from .dimensions import AllDimensions, FlapDimensions, JigDimensions, DisplayDimensions, mm_to_px
 from .slicer import slice_display_image, extract_module_column, apply_transforms, fit_to_target, fit_with_notch_mode
-from .layout import map_images_to_flap_sides, generate_batch_image, apply_ink_save_mask, reorder_for_jig_flip
+from .layout import (map_images_to_flap_sides, generate_batch_image, apply_ink_save_mask,
+                     reorder_for_jig_flip, rotate_insert_rows_180, draw_registration_marks)
 from .labels import render_labels
 from . import svg_loader
 
 logger = logging.getLogger(__name__)
 
 
-def _group_flaps_by_slot(flaps: list[CustomFlap]) -> dict[int, list[CustomFlap]]:
-    """Group CustomFlap entries by slot, preserving declaration order within each group.
-
-    Multiple entries with the same slot index represent alternative coverage
-    for the same physical flap position (e.g. two multi-module ranges that
-    together span different module subsets).  The renderer resolves them
-    left-to-right: the first entry whose module_range covers the current
-    module wins.
-    """
-    groups: dict[int, list[CustomFlap]] = {}
-    for cf in flaps:
-        groups.setdefault(cf.slot, []).append(cf)
-    return groups
+def _flaps_by_slot(flaps: list[CustomFlap]) -> list[CustomFlap]:
+    """Return the custom flap entries ordered by slot (slots are unique)."""
+    return sorted(flaps, key=lambda cf: cf.slot)
 
 
 def _apply_calibration_offset(img: Image.Image, dx_px: int, dy_px: int) -> Image.Image:
@@ -52,7 +43,7 @@ def _apply_calibration_offset(img: Image.Image, dx_px: int, dy_px: int) -> Image
     return shifted
 
 
-def _load_source_image(flap_cfg: CustomFlap, target_height_px: int) -> Image.Image:
+def _load_source_image(source: Optional[str], source_path, target_height_px: int) -> Image.Image:
     """Load and validate a source image (raster or SVG).
 
     ``target_height_px`` is the eventual display-image height in pixels;
@@ -60,12 +51,12 @@ def _load_source_image(flap_cfg: CustomFlap, target_height_px: int) -> Image.Ima
     Raster images are loaded at their native resolution and resampled by
     the downstream pipeline as usual.
     """
-    if flap_cfg.source_path is None or not flap_cfg.source_path.exists():
-        raise FileNotFoundError(f"Source image not found: {flap_cfg.source} "
-                                f"(resolved to {flap_cfg.source_path})")
-    if svg_loader.is_svg(flap_cfg.source_path):
-        return svg_loader.load_svg(flap_cfg.source_path, target_height_px)
-    img = Image.open(flap_cfg.source_path).convert('RGBA')
+    if source_path is None or not source_path.exists():
+        raise FileNotFoundError(f"Source image not found: {source} "
+                                f"(resolved to {source_path})")
+    if svg_loader.is_svg(source_path):
+        return svg_loader.load_svg(source_path, target_height_px)
+    img = Image.open(source_path).convert('RGBA')
     return img
 
 
@@ -84,8 +75,8 @@ def _render_custom_flap_images(
     The physical pocket area is centred within the returned images.
 
     Returns None if the flap does not apply to *module_index* (multi-module
-    flaps whose range excludes the requested module).
-    Returns (blank, blank) for blank or disabled flaps.
+    flaps on the common pass, or with no segment covering the module).
+    Returns (blank, blank) for blank or disabled flaps and blank segments.
     """
     flap_w = mm_to_px(dims.flap.width, dpi)
     flap_h = mm_to_px(dims.flap.height, dpi)
@@ -97,59 +88,67 @@ def _render_custom_flap_images(
     # Per-flap bleed override: bleed=False suppresses edge expansion for this image
     effective_bleed_px = bleed_px if cf.bleed else 0
 
-    def _apply_offset(img: Image.Image) -> Image.Image:
-        """Shift image content by cf.offset_mm within a canvas of the same size."""
-        if cf.offset_mm is None or (cf.offset_mm[0] == 0.0 and cf.offset_mm[1] == 0.0):
+    gt = config.global_transforms
+
+    def _pick(*vals):
+        """First non-None value (segment override → entry → global chain)."""
+        for v in vals:
+            if v is not None:
+                return v
+        return None
+
+    def _apply_offset(img: Image.Image, offset_mm) -> Image.Image:
+        """Shift image content by offset_mm within a canvas of the same size."""
+        if offset_mm is None or (offset_mm[0] == 0.0 and offset_mm[1] == 0.0):
             return img
-        dx_px = round(cf.offset_mm[0] * dpi / 25.4)
-        dy_px = round(cf.offset_mm[1] * dpi / 25.4)
+        dx_px = round(offset_mm[0] * dpi / 25.4)
+        dy_px = round(offset_mm[1] * dpi / 25.4)
         canvas = Image.new('RGBA', img.size, (0, 0, 0, 0))
         canvas.paste(img, (dx_px, dy_px), img)
         return canvas
 
+    global_scale = gt.scale if gt.scale != (1.0, 1.0) else None
+
     if cf.type == "single":
         target_w = mm_to_px(dims.flap.width, dpi)
         target_h = mm_to_px(dims.flap.display_height, dpi)
-        img = _load_source_image(cf, target_h)
-        scale = cf.scale or (config.global_transforms.scale
-                             if config.global_transforms.scale != (1.0, 1.0) else None)
-        crop = cf.crop or config.global_transforms.crop_percent
-        img = apply_transforms(img, scale=scale, crop=crop)
-        fit = cf.fit_mode or config.global_transforms.fit_mode
-        notch = cf.notch_mode or config.global_transforms.notch_mode
+        img = _load_source_image(cf.source, cf.source_path, target_h)
+        img = apply_transforms(img, scale=_pick(cf.scale, global_scale),
+                               crop=_pick(cf.crop, gt.crop_percent))
+        fit = _pick(cf.fit_mode, gt.fit_mode)
+        notch = _pick(cf.notch_mode, gt.notch_mode)
         notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
         img = fit_with_notch_mode(img, target_w, target_h, fit, notch[0], notch[1], notch_inset_px, effective_bleed_px)
-        img = _apply_offset(img)
+        img = _apply_offset(img, cf.offset_mm)
         bleed_y = max(0, (img.height - mm_to_px(dims.flap.display_height, dpi)) // 2)
         return slice_display_image(img, dims.flap, dpi, bleed_y=bleed_y)
 
     if cf.type == "multi-module":
-        if cf.module_range is None:
-            return None
         if module_index < 0:
             # Common/sentinel pass — multi-module content is module-specific; skip.
             return None
-        start_mod, end_mod = cf.module_range
-        if not (start_mod <= module_index <= end_mod):
+        seg = cf.segment_for_module(module_index)
+        if seg is None:
             return None
+        if seg.blank:
+            return blank, blank
         target_h = mm_to_px(dims.flap.display_height, dpi)
-        img = _load_source_image(cf, target_h)
-        scale = cf.scale or (config.global_transforms.scale
-                             if config.global_transforms.scale != (1.0, 1.0) else None)
-        crop = cf.crop or config.global_transforms.crop_percent
-        img = apply_transforms(img, scale=scale, crop=crop)
+        img = _load_source_image(seg.source, seg.source_path, target_h)
+        img = apply_transforms(img, scale=_pick(seg.scale, cf.scale, global_scale),
+                               crop=_pick(seg.crop, cf.crop, gt.crop_percent))
+        start_mod, end_mod = seg.module_range
         num_span = end_mod - start_mod + 1
         total_width_mm = num_span * dims.display.module_pitch - dims.display.inter_module_gap
         target_w = mm_to_px(total_width_mm, dpi)
-        fit = cf.fit_mode or config.global_transforms.fit_mode
-        notch = cf.notch_mode or config.global_transforms.notch_mode
+        fit = _pick(seg.fit_mode, cf.fit_mode, gt.fit_mode)
+        notch = _pick(seg.notch_mode, cf.notch_mode, gt.notch_mode)
         notch_inset_px = mm_to_px(dims.flap.notch_depth, dpi)
         img = fit_to_target(img, target_w, target_h, fit)
-        column = extract_module_column(img, module_index, cf.module_range, dims.display, dpi)
+        column = extract_module_column(img, module_index, seg.module_range, dims.display, dpi)
         flap_w_px = mm_to_px(dims.flap.width, dpi)
         flap_display_h = mm_to_px(dims.flap.display_height, dpi)
         column = fit_with_notch_mode(column, flap_w_px, flap_display_h, fit, notch[0], notch[1], notch_inset_px, effective_bleed_px)
-        column = _apply_offset(column)
+        column = _apply_offset(column, _pick(seg.offset_mm, cf.offset_mm))
         bleed_y = max(0, (column.height - mm_to_px(dims.flap.display_height, dpi)) // 2)
         return slice_display_image(column, dims.flap, dpi, bleed_y=bleed_y)
 
@@ -166,56 +165,34 @@ def _resolve_flaps_for_module(
     """Resolve and slice all custom flap images for a given module.
 
     Returns a list of (top_half, bottom_half, label) tuples, one per slot
-    that has content for this module.
+    that has content for this module, in slot order.
 
-    Multiple entries with the same slot are tried in declaration order;
-    the first entry whose module_range covers *module_index* wins.
-    module_range is respected for all entry types, not just multi-module:
-    this allows a ``{"type": "blank", "module_range": [0, 2]}`` entry to
-    fill in a partial range without overriding adjacent ranges in the same
-    slot.
-
-    When module_index >= 0 (a real module pass, not the common/sentinel pass)
-    and a slot has at least one multi-module entry but none of them cover
-    *module_index*, a blank is inserted and a warning is logged.
+    Multi-module flaps render the segment covering *module_index*.  When
+    module_index >= 0 (a real module pass, not the common/sentinel pass)
+    and no segment covers the module, a blank is inserted (upfront warning
+    already logged by render_job).  On the common pass, multi-module slots
+    are omitted entirely.
     """
     flap_w = mm_to_px(dims.flap.width, dpi)
     flap_h = mm_to_px(dims.flap.height, dpi)
     blank = Image.new('RGBA', (flap_w, flap_h), (0, 0, 0, 0))
 
-    slot_groups = _group_flaps_by_slot(config.custom_flaps)
     results = []
 
-    for slot in sorted(slot_groups.keys()):
-        entries = slot_groups[slot]
-        pair = None
-        winning_label = None
-
-        for cf in entries:
-            # Respect module_range for all types: if an entry explicitly declares
-            # a range, skip it when the current module is outside that range.
-            if cf.module_range is not None and module_index >= 0:
-                start, end = cf.module_range
-                if not (start <= module_index <= end):
-                    continue
-            candidate = _render_custom_flap_images(cf, config, module_index, dims, dpi, bleed_px)
-            if candidate is not None:
-                pair = candidate
-                winning_label = cf.label
-                break
-
-        if pair is None:
-            has_multimodule = any(e.type == 'multi-module' for e in entries)
-            if has_multimodule and module_index >= 0:
-                # All entries for this multi-module slot lack coverage here —
-                # insert a blank.  (Upfront warning already logged by render_job.)
-                pair = (blank.copy(), blank.copy())
-                winning_label = f"{entries[0].label}-blank"
-            # else: non-multi-module slot that skipped all entries (shouldn't
-            # normally happen); omit silently to preserve prior behaviour.
-
+    for cf in _flaps_by_slot(config.custom_flaps):
+        pair = _render_custom_flap_images(cf, config, module_index, dims, dpi, bleed_px)
         if pair is not None:
-            results.append((*pair, winning_label))
+            winning_label = cf.label
+        elif cf.type == 'multi-module' and module_index >= 0:
+            # No segment covers this module — insert a blank so the slot
+            # position is preserved.
+            pair = (blank.copy(), blank.copy())
+            winning_label = f"{cf.label}-blank"
+        else:
+            # Multi-module slot on the common pass; omit.
+            continue
+
+        results.append((*pair, winning_label))
 
     return results
 
@@ -253,12 +230,11 @@ def _collect_preview_entries(
     Images are rendered with bleed and then cropped to the physical pocket
     area, so the preview is WYSIWYG.
 
-    Slot grouping rules:
-    - Non-multi-module slots appear once (first entry in the group).
-    - Multi-module slot groups enumerate every module that is processed for
-      the job (from ``_get_modules_to_process``).  Modules that have no
-      coverage within that slot group are shown as a labelled blank so the
-      user can see the gap.
+    Rules:
+    - Non-multi-module slots appear once.
+    - Multi-module slots enumerate every module that is processed for the
+      job (from ``_get_modules_to_process``).  Modules that no segment
+      covers are shown as a labelled blank so the user can see the gap.
     """
     flap_w = mm_to_px(dims.flap.width, dpi)
     flap_h = mm_to_px(dims.flap.height, dpi)
@@ -268,41 +244,27 @@ def _collect_preview_entries(
     # Modules that will be rendered (>= 0 only; -1 sentinel excluded)
     processed_modules = sorted(m for m in _get_modules_to_process(config, None) if m >= 0)
 
-    slot_groups = _group_flaps_by_slot(config.custom_flaps)
     entries = []
 
-    for slot in sorted(slot_groups.keys()):
-        slot_entries = slot_groups[slot]
-        has_multimodule = any(e.type == 'multi-module' for e in slot_entries)
-
-        if has_multimodule:
+    for cf in _flaps_by_slot(config.custom_flaps):
+        if cf.type == 'multi-module':
             for m in processed_modules:
-                pair = None
-                winning_label = None
-                for cf in slot_entries:
-                    if cf.module_range is not None:
-                        start, end = cf.module_range
-                        if not (start <= m <= end):
-                            continue
-                    candidate = _render_custom_flap_images(cf, config, m, dims, dpi, bleed_px)
-                    if candidate is not None:
-                        pair = candidate
-                        winning_label = f"{cf.label} M{m} · #{slot}"
-                        break
-                if pair is None:
+                pair = _render_custom_flap_images(cf, config, m, dims, dpi, bleed_px)
+                if pair is not None:
+                    winning_label = f"{cf.label} M{m} · #{cf.slot}"
+                else:
                     pair = (blank.copy(), blank.copy())
-                    winning_label = f"BLANK M{m} · #{slot}"
+                    winning_label = f"BLANK M{m} · #{cf.slot}"
                 top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True)
                 bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False)
                 entries.append((top, bottom, winning_label))
         else:
-            # Non-multi-module slot: use first entry, render module-agnostic
-            cf = slot_entries[0]
+            # Render module-agnostic
             pair = _render_custom_flap_images(cf, config, -1, dims, dpi, bleed_px)
             if pair is not None:
                 top = _crop_to_pocket(pair[0], flap_w, flap_h, is_top=True)
                 bottom = _crop_to_pocket(pair[1], flap_w, flap_h, is_top=False)
-                entries.append((top, bottom, f"{cf.label} · #{slot}"))
+                entries.append((top, bottom, f"{cf.label} · #{cf.slot}"))
 
     return entries
 
@@ -318,11 +280,191 @@ def _get_modules_to_process(config: JobConfig, module_filter: Optional[list[int]
             # Single images produce the same output for all modules;
             # output once as "common"
             modules.add(-1)  # sentinel for common/shared
-        elif cf.type == "multi-module" and cf.module_range:
-            for m in range(cf.module_range[0], cf.module_range[1] + 1):
-                modules.add(m)
+        elif cf.type == "multi-module" and cf.segments:
+            # Enumerate per segment (not the overall span) so gaps between
+            # segments do not pull in modules nothing covers.
+            for seg in cf.segments:
+                for m in range(seg.module_range[0], seg.module_range[1] + 1):
+                    modules.add(m)
 
     return sorted(modules)
+
+
+def _finish_and_save(
+    front_img: Image.Image,
+    back_img: Image.Image,
+    front_path: Path,
+    back_path: Path,
+    config: JobConfig,
+    dims: AllDimensions,
+    dpi: float,
+    reg_on: bool,
+) -> None:
+    """Apply sheet-space finishing (registration marks, calibration offset,
+    DPI metadata) and save both sides.  Shared by the batch and sheet flows.
+    """
+    if reg_on:
+        lw = config.output.registration_mark_line_width_mm
+        front_img = draw_registration_marks(front_img, dpi, line_width_mm=lw)
+        back_img = draw_registration_marks(back_img, dpi, line_width_mm=lw)
+
+    # Global calibration offset (applied last so it moves *everything* —
+    # flap art, ink-save mask, labels, and registration marks — together).
+    # Compensates for systematic printer-vs-jig offsets such as eufyMake
+    # Zero-Point calibration error.  Per-jig value wins over output section.
+    cal = config.jig.calibration_offset_mm
+    if cal is None:
+        cal = config.output.calibration_offset_mm
+    cal_dx_mm, cal_dy_mm = cal
+    if cal_dx_mm != 0.0 or cal_dy_mm != 0.0:
+        cal_dx_px = round(cal_dx_mm * dpi / 25.4)
+        cal_dy_px = round(cal_dy_mm * dpi / 25.4)
+        front_img = _apply_calibration_offset(front_img, cal_dx_px, cal_dy_px)
+        back_img = _apply_calibration_offset(back_img, cal_dx_px, cal_dy_px)
+
+    # Effective per-axis DPI from actual pixel count vs intended mm size, so
+    # downstream tools read back exact physical dimensions (see session log).
+    img_w_px, img_h_px = front_img.size
+    eff_dpi_x = img_w_px * 25.4 / dims.printable.width
+    eff_dpi_y = img_h_px * 25.4 / dims.printable.height
+    dpi_info = (eff_dpi_x, eff_dpi_y)
+
+    front_img.save(str(front_path), dpi=dpi_info)
+    back_img.save(str(back_path), dpi=dpi_info)
+    logger.info("Wrote %s, %s", front_path, back_path)
+
+
+def _render_sheets(
+    config: JobConfig,
+    dims: AllDimensions,
+    dpi: float,
+    out_dir: Path,
+    modules: list[int],
+    module_filter: Optional[list[int]],
+    labels_on: bool,
+    mask_on: bool,
+    reg_on: bool,
+    flip: str,
+    bleed_px: int,
+) -> list[Path]:
+    """Global-packing flow for multi-row jigs (standard flatbed).
+
+    The packed sheet set is the COMPLETE physical print job for the whole
+    display, one flap each: every module 0..num_modules-1 contributes its
+    full flap sequence (modules covered by multi-module segments get their
+    per-module sequence; uncovered modules get the module-agnostic
+    singles-only sequence).  Print every sheet exactly once — there is no
+    "repeat the common file per module" step like the single-row flow.
+    Output goes to the output directory root as sheet_NN_front/back images
+    plus a sheets_manifest.txt mapping each pocket to its flap label and
+    module.
+
+    Back-side geometry is per INSERT: the operator flips each insert row
+    individually, so each row is built with left-right semantics and — for
+    front-back jobs — rotated 180° about its own row centre.
+    """
+    # Modules that have module-specific (multi-module) content.
+    covered_modules = {m for m in modules if m >= 0}
+    # Physical modules to pack: the whole display, or the --modules filter.
+    if module_filter is not None:
+        physical_modules = sorted(m for m in module_filter if m >= 0)
+    else:
+        physical_modules = list(range(config.display.num_modules))
+
+    # Collect (front, back, group_label) pairs, one full sequence per
+    # physical module.  Front/back pairing (back of flap K = bottom half of
+    # flap K+1) is formed within each module's sequence before packing, so
+    # any global order is physically correct.
+    entries: list[tuple] = []
+    for m in physical_modules:
+        if m in covered_modules:
+            mod_label = f"module_{m:02d}"
+            flap_data = _resolve_flaps_for_module(config, m, dims, dpi, bleed_px)
+        else:
+            # No module-specific content — this module uses the
+            # module-agnostic singles-only sequence.
+            mod_label = f"module_{m:02d} (common)"
+            flap_data = _resolve_flaps_for_module(config, -1, dims, dpi, bleed_px)
+        if not flap_data:
+            logger.info("No custom flaps for %s, skipping", mod_label)
+            continue
+        slot_images = [(top, bottom) for top, bottom, _ in flap_data]
+        labels = [label for _, _, label in flap_data]
+        fronts, backs = map_images_to_flap_sides(slot_images, labels)
+        entries += [(f, b, mod_label) for f, b in zip(fronts, backs)]
+
+    if not entries:
+        return []
+
+    per_sheet = dims.jig.flaps_per_sheet
+    per_row = dims.jig.flaps_per_batch
+    num_sheets = math.ceil(len(entries) / per_sheet)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fmt = config.output.format.lower()
+    generated: list[Path] = []
+    manifest: list[str] = [
+        f"Sheet manifest — jig '{config.active_jig}' ({dims.jig.rows} insert rows × "
+        f"{per_row} pockets, flip={flip})",
+        "Rows are numbered top-to-bottom in the print image; pockets left-to-right.",
+        "Back sheets use the same rows — flip each insert individually.",
+        "",
+    ]
+
+    for s in range(num_sheets):
+        chunk = entries[s * per_sheet:(s + 1) * per_sheet]
+        front_batch = [e[0] for e in chunk]
+        back_batch = [e[1] for e in chunk]
+
+        # Per-insert back reorder: each insert row is its own flip unit.
+        reordered_back = []
+        for start in range(0, len(back_batch), per_row):
+            reordered_back += reorder_for_jig_flip(
+                back_batch[start:start + per_row], dims.jig, "left-right")
+
+        front_img = generate_batch_image(front_batch, dims.flap, dims.jig, dims.printable, dpi,
+                                         spool_at_bottom=True)
+        back_img = generate_batch_image(reordered_back, dims.flap, dims.jig, dims.printable, dpi,
+                                        spool_at_bottom=False)
+
+        if mask_on:
+            front_img = apply_ink_save_mask(front_img, dims.flap, dims.jig, dims.printable, dpi,
+                                            config.output.bleed_mm, spool_at_bottom=True)
+            back_img = apply_ink_save_mask(back_img, dims.flap, dims.jig, dims.printable, dpi,
+                                           config.output.bleed_mm, spool_at_bottom=False)
+
+        if labels_on:
+            front_img = render_labels(front_img, front_batch, dims.flap, dims.jig, dims.printable, dpi,
+                                      config.output.label_font_size_pt)
+            back_img = render_labels(back_img, reordered_back, dims.flap, dims.jig, dims.printable, dpi,
+                                     config.output.label_font_size_pt)
+
+        # Front-back flip == left-right flip + 180° rotation, applied PER
+        # INSERT ROW (each insert is flipped individually on the bed).
+        if flip == "front-back":
+            back_img = rotate_insert_rows_180(back_img, dims.flap, dims.jig, dims.printable, dpi)
+
+        front_path = out_dir / f"sheet_{s + 1:02d}_front.{fmt}"
+        back_path = out_dir / f"sheet_{s + 1:02d}_back.{fmt}"
+        _finish_and_save(front_img, back_img, front_path, back_path,
+                         config, dims, dpi, reg_on)
+        generated.extend([front_path, back_path])
+
+        manifest.append(f"Sheet {s + 1:02d}:")
+        for start in range(0, len(chunk), per_row):
+            row_idx = start // per_row + 1
+            row_desc = ", ".join(
+                f"P{p + 1}: {e[0].label} [{e[2]}]"
+                for p, e in enumerate(chunk[start:start + per_row]))
+            manifest.append(f"  Row {row_idx}: {row_desc}")
+        manifest.append("")
+
+    manifest_path = out_dir / "sheets_manifest.txt"
+    manifest_path.write_text("\n".join(manifest), encoding='utf-8')
+    generated.append(manifest_path)
+    logger.info("Packed %d flaps onto %d sheet(s); manifest at %s",
+                len(entries), num_sheets, manifest_path)
+
+    return generated
 
 
 def render_job(
@@ -352,26 +494,26 @@ def render_job(
     bleed_px = mm_to_px(config.output.bleed_mm, dpi)
 
     # Warn upfront about multi-module slots that have coverage gaps for the
-    # modules this job will process.
-    slot_groups = _group_flaps_by_slot(config.custom_flaps)
+    # modules this job will process.  (Explicit blank segments count as
+    # coverage and do not warn.)
     processed_module_set = {m for m in modules if m >= 0}
-    for slot, entries in sorted(slot_groups.items()):
-        if not any(e.type == 'multi-module' for e in entries):
+    for cf in _flaps_by_slot(config.custom_flaps):
+        if cf.type != 'multi-module':
             continue
-        uncovered = []
-        for m in sorted(processed_module_set):
-            covered = any(
-                e.type == 'multi-module' and e.module_range is not None
-                and e.module_range[0] <= m <= e.module_range[1]
-                for e in entries
-            )
-            if not covered:
-                uncovered.append(m)
+        uncovered = [m for m in sorted(processed_module_set)
+                     if cf.segment_for_module(m) is None]
         if uncovered:
             logger.warning(
                 "Slot %d ('%s'): modules %s have no coverage — will output blank flap(s)",
-                slot, entries[0].label, uncovered,
+                cf.slot, cf.label, uncovered,
             )
+
+    if dims.jig.rows > 1:
+        # Multi-row jig (standard flatbed): globally pack all groups' flaps
+        # onto shared sheets.
+        generated += _render_sheets(config, dims, dpi, out_dir, modules, module_filter,
+                                    labels_on, mask_on, reg_on, flip, bleed_px)
+        modules = []  # skip the per-group batch flow below
 
     for mod_idx in modules:
         if mod_idx == -1:
@@ -451,47 +593,13 @@ def render_job(
             if flip == "front-back":
                 back_img = back_img.transpose(Image.ROTATE_180)
 
-            # Corner registration marks (after mask + labels so they aren't clipped)
-            if reg_on:
-                from .layout import draw_registration_marks
-                lw = config.output.registration_mark_line_width_mm
-                front_img = draw_registration_marks(front_img, dpi, line_width_mm=lw)
-                back_img = draw_registration_marks(back_img, dpi, line_width_mm=lw)
-
-            # Global calibration offset (applied last so it moves *everything*
-            # — flap art, ink-save mask, labels, and registration marks —
-            # together).  Compensates for systematic printer-vs-jig offsets
-            # such as eufyMake Zero-Point calibration error.
-            cal_dx_mm, cal_dy_mm = config.output.calibration_offset_mm
-            if cal_dx_mm != 0.0 or cal_dy_mm != 0.0:
-                cal_dx_px = round(cal_dx_mm * dpi / 25.4)
-                cal_dy_px = round(cal_dy_mm * dpi / 25.4)
-                front_img = _apply_calibration_offset(front_img, cal_dx_px, cal_dy_px)
-                back_img = _apply_calibration_offset(back_img, cal_dx_px, cal_dy_px)
-
-            # Set DPI metadata.
-            # Compute the *effective* DPI from the actual saved pixel count
-            # and the intended physical size in mm, so that downstream tools
-            # (eufyMake Studio, etc.) read the image back at exactly the
-            # target mm dimensions instead of off-by-pixel-rounding values
-            # (e.g. 90 mm @ 360 DPI → 1276 px, which naively reads back as
-            # 90.022 mm).  Per-axis because the actual pixel rounding can
-            # differ on each axis.
-            img_w_px, img_h_px = front_img.size
-            eff_dpi_x = img_w_px * 25.4 / dims.printable.width
-            eff_dpi_y = img_h_px * 25.4 / dims.printable.height
-            dpi_info = (eff_dpi_x, eff_dpi_y)
-
-            # Save
+            # Registration marks + calibration offset + DPI metadata + save
             fmt = config.output.format.lower()
             front_path = mod_dir / f"batch_{b + 1:02d}_front.{fmt}"
             back_path = mod_dir / f"batch_{b + 1:02d}_back.{fmt}"
-
-            front_img.save(str(front_path), dpi=dpi_info)
-            back_img.save(str(back_path), dpi=dpi_info)
-
+            _finish_and_save(front_img, back_img, front_path, back_path,
+                             config, dims, dpi, reg_on)
             generated.extend([front_path, back_path])
-            logger.info("Wrote %s, %s", front_path, back_path)
 
     # Generate preview if enabled (uses a separate lower DPI for screen output)
     if config.preview.enabled:

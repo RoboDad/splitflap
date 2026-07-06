@@ -46,22 +46,26 @@ def render_labels(
     margin_y_px = mm_to_px(jig.margin_y, dpi)
     space_x_px = mm_to_px(flap.height + jig.gap_x, dpi)
     space_y_px = mm_to_px(flap.width + jig.gap_y, dpi)
+    row_pitch_px = mm_to_px(jig.row_pitch, dpi)
     flap_w_px = mm_to_px(flap.width, dpi)
     flap_h_px = mm_to_px(flap.height, dpi)
     sheet_h_px = image.height  # = work.width
 
     label_color = (200, 200, 200, 255)  # light grey, visible on transparent bg
 
-    for i, fs in enumerate(flap_sides[:jig.flaps_per_batch]):
+    for i, fs in enumerate(flap_sides[:jig.flaps_per_sheet]):
         if not fs.label:
             continue
 
         col = i % jig.num_x
-        row = i // jig.num_x
+        grid_row = i // jig.num_x
+        insert_idx = grid_row // jig.num_y
+        pocket_row = grid_row % jig.num_y
 
         # Pocket top-left in sheet-frame pixels
         pocket_x_s = insert_x_px + margin_x_px + col * space_x_px
-        pocket_y_s = insert_y_px + margin_y_px + row * space_y_px
+        pocket_y_s = (insert_y_px + insert_idx * row_pitch_px
+                      + margin_y_px + pocket_row * space_y_px)
 
         # Map into the upright work frame (work = ROTATE_270(sheet)):
         # the pocket appears upright with its top-left at (work_x, work_y).

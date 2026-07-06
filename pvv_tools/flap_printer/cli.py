@@ -38,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--no-registration-marks', dest='registration_marks', action='store_false',
                         help='Disable corner registration marks (overrides config)')
     parser.add_argument('--flip-mode', choices=['left-right', 'front-back'], default=None, help='Override flip mode')
+    parser.add_argument('--jig', type=str, default=None,
+                        help="Select a jig by name from the job file's 'jigs' map (overrides active_jig)")
     parser.add_argument('--print-size', type=float, nargs=2, metavar=('W', 'H'), default=None,
                         help='Override output size in mm (width height)')
     parser.add_argument('--dry-run', action='store_true', help='Validate config and print summary without generating images')
@@ -57,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
     # Load config
     try:
         config = load_config(args.job_file)
+        if args.jig:
+            config.select_jig(args.jig)
     except (FileNotFoundError, ValueError, KeyError) as e:
         logging.error("Config error: %s", e)
         return 1
@@ -89,13 +93,15 @@ def main(argv: list[str] | None = None) -> int:
             module_width=dims.flap.width,
         )
 
-    # Apply output.canvas_size_mm override (e.g. match eufyMake Studio's
-    # Camera-mode mat canvas: [335, 90]).  The insert stays anchored to the
-    # image's left and bottom edges — extra canvas size is added at the top
-    # and right — so flap content keeps its calibrated physical placement
-    # while the output image grows to match the eufyMake working canvas.
-    if config.output.canvas_size_mm is not None:
-        cw, ch = config.output.canvas_size_mm
+    # Apply the canvas_size_mm override (e.g. match eufyMake Studio's
+    # Camera-mode mat canvas: [335, 90]).  Per-jig value wins over the
+    # output section.  The insert stays anchored to the image's left and
+    # bottom edges — extra canvas size is added at the top and right — so
+    # flap content keeps its calibrated physical placement while the output
+    # image grows to match the eufyMake working canvas.
+    canvas_override = config.jig.canvas_size_mm or config.output.canvas_size_mm
+    if canvas_override is not None:
+        cw, ch = canvas_override
         dims.printable = dims.printable.__class__(
             width=cw,
             height=ch,
@@ -118,10 +124,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  Flap: {dims.flap.width}×{dims.flap.height}mm, gap={dims.flap.gap}mm, "
               f"display_height={dims.flap.display_height}mm")
         insert = dims.jig.insert_size(dims.flap)
-        print(f"  Jig insert: {insert[0]:.1f}×{insert[1]:.1f}mm ({dims.jig.flaps_per_batch} flaps/batch)")
+        rows_info = (f", {dims.jig.rows} insert rows @ {dims.jig.row_pitch:.1f}mm pitch "
+                     f"= {dims.jig.flaps_per_sheet} flaps/sheet") if dims.jig.rows > 1 else ""
+        print(f"  Jig insert: {insert[0]:.1f}×{insert[1]:.1f}mm ({dims.jig.flaps_per_batch} flaps/batch{rows_info})")
         pa = dims.printable
-        canvas_overridden = config.output.canvas_size_mm is not None
-        label = "Output canvas" if canvas_overridden else "Printable area"
+        label = "Output canvas" if canvas_override is not None else "Printable area"
         print(f"  {label}: {pa.width}×{pa.height}mm")
         print(f"  Insert offset: ({pa.insert_offset_x:.1f}, {pa.insert_offset_y:.1f})mm")
         print(f"  Module pitch: {dims.display.module_pitch}mm, gap: {dims.display.inter_module_gap}mm")
@@ -129,8 +136,9 @@ def main(argv: list[str] | None = None) -> int:
 
         dpi = args.dpi or config.output.dpi
         import math
-        num_batches = math.ceil(len(config.custom_flaps) / dims.jig.flaps_per_batch)
-        print(f"Output: {dpi} DPI, {num_batches} batch(es) × 2 sides = {num_batches * 2} images")
+        unit = "sheet" if dims.jig.rows > 1 else "batch"
+        num_units = math.ceil(len(config.custom_flaps) / dims.jig.flaps_per_sheet)
+        print(f"Output: {dpi} DPI, ~{num_units} {unit}(s) × 2 sides per group")
         from .dimensions import mm_to_px
         print(f"  Canvas size: {mm_to_px(pa.width, dpi)}×{mm_to_px(pa.height, dpi)} px "
               f"({pa.width:.1f}×{pa.height:.1f} mm)")
