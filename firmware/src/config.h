@@ -55,6 +55,7 @@
 // };
 
 // Flap option 2: v2 flaps (52 per module)
+#ifndef PVV_FLAPS_62
 #define NUM_FLAPS (52)
 const uint8_t flaps[NUM_FLAPS] = {
   ' ', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L',
@@ -62,6 +63,34 @@ const uint8_t flaps[NUM_FLAPS] = {
   'Z', 'g', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'r',
   '.', '?', '-', '$', '\'', '#', 'y', 'p', ',', '!', '@', '&', 'w'
 };
+#endif
+
+// Flap option 5: PVV custom 62-flap set — Scott's standard 52-flap v2
+// sequence with 10 custom UV-printed flaps INSERTED after the '$' flap
+// (physical spool order confirmed 2026-07-06).  Enabled with
+// -DPVV_FLAPS_62 (see [env:chainlink_pvv62] in platformio.ini).
+//
+// Custom flap codes (lowercase mnemonics, chosen to avoid the color-block
+// letters g/p/r/w/y used by the standard set), at indexes 43..52:
+//   43 h = heart emoji       44 j = joy emoji        45 n = wink emoji
+//   46 s = smile emoji       47 b = sob emoji        48 k = kiss emoji
+//   49 e = heart_eyes emoji  50 d = art_1 (woodgathering)
+//   51 c = panorama (skyline, multi-module panel)
+//   52 t = art_2 (triptych, multi-module panel)
+//
+// Note: the printed flap labels PVV42..PVV53 are 1-BASED spool positions
+// (PVV44 = heart = index 43), matching this table.
+#ifdef PVV_FLAPS_62
+#define NUM_FLAPS (62)
+const uint8_t flaps[NUM_FLAPS] = {
+  ' ', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L',
+  'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
+  'Z', 'g', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'r',
+  '.', '?', '-', '$',
+  'h', 'j', 'n', 's', 'b', 'k', 'e', 'd', 'c', 't',
+  '\'', '#', 'y', 'p', ',', '!', '@', '&', 'w'
+};
+#endif
 
 // Flap option 3: v2 flaps (limited 40-flap set using the first 40 flaps of the set)
 // #define NUM_FLAPS (40)

@@ -1,13 +1,38 @@
 # Plan: SocialMQTT — Social Media to Splitflap Bridge
-# Status: Planning complete, implementation not started (as of 2026-03-27)
+# Status: Planning complete, implementation not started. Revised 2026-07-05
+# (roadmap restructure + critical review; original plan 2026-03-27).
 # Resume in Agent mode. Start with Phase 0.
+
+## Roadmap (revised 2026-07-05)
+
+The display-software effort is now three parts, in order:
+
+- **Part I-A — 62-flap firmware** (STARTED 2026-07-05, spool order
+  confirmed 2026-07-06): the physical display uses custom 62-flap modules
+  (Scott's 52-flap sequence with 10 custom flaps — 7 emoji, 1 artwork,
+  2 multi-module panels — inserted after '$').  Firmware support exists
+  as `[env:chainlink_pvv62]` (`-DPVV_FLAPS_62`, "Flap option 5" in
+  `firmware/src/config.h`) and builds clean.  Remaining: flash,
+  re-calibrate offsets, see it flip.
+- **Part I-B — BLE iPhone app** (NEW): direct Bluetooth control for
+  demoing the display away from home WiFi.  Full plan in
+  `pvv_plans/BLE-app-plan.md`.  Independent of the bridge; shares the
+  62-flap character codes.
+- **Part I-C — SocialMQTT bridge**: this document (Phases 0–5 below).
+
+**Canonical custom-flap code map** (single source of truth is
+`firmware/src/config.h` "Flap option 5"; the bridge's `_sanitize()`
+charset and the BLE app's emoji picker must match it):
+`h`=heart `j`=joy `n`=wink `s`=smile `b`=sob `k`=kiss `e`=heart_eyes
+`d`=art_1(woodgathering) `c`=panorama(skyline, multi) `t`=art_2(triptych,
+multi) — indexes 43–52, inserted after '$' (42) in Scott's sequence.
 
 ## Context
 - Hardware: scottbez1/splitflap on ESP32 (chainlink board)
 - Current display: 24 modules; future displays up to 100+ modules
-- Flap count: 58 or 64 per module (extended, vs standard 40/52) — firmware changes are Part II
+- Flap count: 62 per module (standard 52-flap set + 10 custom) — firmware support started, see Part I-A in the roadmap above
 - MQTT command topic: `home/<DEVICE_NAME>/command` — plain-text payload, uppercase
-- Character set (Part I): standard 52-flap set (A-Z, 0-9, space, punctuation)
+- Character set (bridge Part I-C): standard 52-flap subset (A-Z, 0-9, space, punctuation); custom-flap codes arrive with the Part II escape sequences
 - Firmware lib: PubSubClient v2.8 — plain TCP only, needs WiFiClientSecure swap for TLS
 - OTA: ArduinoOTA fully supported, chainlink_ota env in platformio.ini
 - MQTT broker: EMQX Cloud free tier (serverless, TLS port 8883)
@@ -15,12 +40,19 @@
 - BlueSky trigger: mention + #todisplay sentinel + sender whitelist
 - Discord trigger: dedicated channel + whitelist
 
-## Part II scope (explicitly deferred — do not plan or implement yet)
-- Extended flap count support (58/64 flaps) in firmware
-- Multi-module image display driven by emoji-style escape sequences (e.g. [:HEART:]) in message strings
-- Firmware character set expansion beyond standard 52-flap set
-- Displays over 100 modules
-- Note: _sanitize() should leave a placeholder comment for escape sequence passthrough
+## Part II scope (updated 2026-07-05)
+- ~~Extended flap count support (58/64 flaps) in firmware~~ → **promoted to
+  Part I-A and started**: the display is 62 flaps; firmware charset done
+  (pending spool-order confirmation).
+- Still deferred:
+  - Bridge-side emoji escape sequences in message strings
+    (e.g. `[:HEART:]` → flap code `h`) — becomes a small `_sanitize()`
+    translation table once Part I-A is confirmed; `_sanitize()` should
+    leave a placeholder comment for this passthrough.
+  - Multi-module panel triggers in messages (e.g. `[:SKYLINE:]` spanning
+    modules 0–5) — needs index-level control from the bridge (the plain
+    text topic can carry the `c`/`t` codes per module as an interim hack).
+  - Displays over 100 modules.
 
 ## Directory structure
 - Firmware fork: C:\Users\phgev\Documents\Make\Splitflap\Firmware\splitflap\
@@ -153,3 +185,62 @@ discord:
 5b. docs/setup-raspberry-pi.md, docs/adding-a-display.md, docs/architecture.md
 5c. README.md with overview + quick-start + all doc links
 5d. Full integration test: both platforms simultaneously, FIFO ordering, min_display_time gap verified
+
+## Critical review (2026-07-05, against the actual repo and current services)
+
+Verified correct — no action needed:
+- All firmware paths in this plan exist as written (`firmware/esp32/splitflap/
+  mqtt_task.{h,cpp}`, `secrets.h.example`, `[env:chainlink_ota]`).
+- `-DMQTT=false` flag and PubSubClient 2.8 are wired exactly as assumed;
+  `MQTT_MAX_PACKET_SIZE` is already 512 in platformio.ini (ample for text).
+- The MQTT command topic (`home/<DEVICE_INSTANCE_NAME>/command`) feeds
+  `showString(payload, length, false, true)` — plain text, as planned.
+- espressif32@3.4 (arduino-esp32 1.0.6) has `WiFiClientSecure` with
+  `setInsecure()`, so the Phase 1 TLS swap is a small, safe change.
+- EMQX Serverless free-tier quota check: 2 always-on clients (bridge +
+  display) ≈ 86k session-minutes/month vs the 1M free allowance — fine
+  even with several displays.
+
+Corrections / additions to fold into the phases:
+1. **Discord privileged intent** (Phase 4 + docs/setup-discord.md): reading
+   message text requires enabling the *Message Content Intent* in the
+   Discord developer portal AND passing `intents.message_content = True`
+   to discord.py. The plan omits this; bots silently receive empty
+   message bodies without it.
+2. **Firmware behavior with unknown characters**: `showString()` silently
+   leaves a module UNCHANGED for any character not in `flaps[]` (no error,
+   no homing). The bridge's `_sanitize()` is therefore load-bearing — and
+   it should PAD messages to the display's module count with spaces,
+   because the MQTT path sets `default_unspecified_home=true` (modules
+   beyond the payload go to blank, which is desirable — rely on it and
+   document it rather than discovering it).
+3. **Retained messages**: publish commands NOT retained. A retained social
+   post would replay onto the display every time it reboots, arbitrarily
+   late. If "restore last message after power cycle" is ever wanted, do it
+   bridge-side with a freshness window.
+4. **`_sanitize()` charset must match firmware**: the allowed set
+   `[A-Z0-9 .?$'#!@&,-]` remains correct for the standard subset, but the
+   canonical source of truth is now `config.h` "Flap option 5" (62 flaps).
+   Add the lowercase custom codes only via the Part II escape-sequence
+   table — never let raw lowercase from social posts through, since
+   lowercase letters are flap codes (`h` = heart!). Uppercasing BEFORE
+   filtering (as planned) already guarantees this; keep that order.
+5. **TLS with `setInsecure()`**: acceptable for v1 (low-sensitivity data,
+   credentials still protect the broker), but note it explicitly accepts
+   MITM. v2 option: embed the EMQX CA cert (`setCACert()`); costs ~1.5 KB
+   flash and breaks on CA rotation, so document the tradeoff in
+   docs/setup-emqx.md rather than hard-requiring it.
+6. **Home Assistant discovery publish** in `connectMQTT()` fires a config
+   message to `homeassistant/text/...` on every connect. Harmless on EMQX,
+   but consider gating it behind a `HOME_ASSISTANT` define during the
+   Phase 1 firmware edits to keep the broker tidy.
+7. **BlueSky auth**: app passwords still work but Bluesky is moving toward
+   OAuth; atproto-lib handles sessions either way. Not a blocker — note in
+   docs/setup-bluesky.md to revisit if login starts failing. Polling
+   `listNotifications` every 30 s is far inside rate limits.
+8. **Bridge resilience** (Phase 2): add explicit reconnect/backoff for the
+   MQTT client and a bounded queue (drop-oldest + log) so a burst of posts
+   or a display outage cannot grow memory unbounded on the Pi.
+9. **Ordering nit**: Phase 1e says "verify device shows online in EMQX
+   dashboard" — EMQX signup is Phase 0b, so keep 0b strictly before 1e
+   (already implied, just noting the dependency).

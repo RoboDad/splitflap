@@ -742,3 +742,136 @@ at the gap boundary and discarded the gap strip.
   had forgotten the minibed's +1 mm calibration shift, not a code bug.)
 - Visual before/after zoom of the heart emoji gap edge: artwork now extends
   through the cut edge into the bleed zone; notch voids respected.
+
+## 2026-07-05 (overnight) - Planning revision + 62-flap firmware started
+
+- **Model:** Claude Fable 5
+- **Commits:** none (left uncommitted for morning review)
+- **Files touched:**
+  - `firmware/src/config.h` ("Flap option 5": PVV 62-flap set behind
+    -DPVV_FLAPS_62; standard option 2 untouched otherwise)
+  - `platformio.ini` (new [env:chainlink_pvv62] extending chainlink)
+  - `pvv_plans/BLE-app-plan.md` (new — Part I-B plan)
+  - `pvv_plans/SocialMQTT-plan.md` (roadmap restructure, Part II update,
+    critical-review section appended)
+
+### Goal (user request before signing off)
+1. Promote extended-flap firmware from Part II to now: display is 62 flaps
+   (confirmed by num_flaps=62 in PVV_splitflap_mods.scad); get firmware
+   changes started so the custom modules can be seen in action.
+2. Add an intermediate milestone: iPhone app driving the display over
+   Bluetooth (for demos at work, off any WiFi), with emoji + triptych
+   support and decent UX.
+3. Critically review the SocialMQTT plan with fresh eyes.
+
+### 62-flap firmware (Part I-A) — done to "builds clean"
+- Verified feasibility: step math supports non-integral steps/flap
+  (2048/62 ~ 33.03); proto flap_character_set max_size=80 fits 62 (no
+  proto regen); QCMD_FLAP(99)+62 < 255; saved-config invalidation on
+  num_flaps change is graceful (logged, ignored).
+- config.h option 5: standard 52 in standard order + 10 custom flaps at
+  indexes 52-61 with lowercase mnemonic codes h/j/n/s/b/k/e/d/c/t
+  (avoiding the color-block letters g/p/r/w/y).
+- Both `pio run -e chainlink_pvv62` (10.7% RAM / 30.4% flash) and the
+  default `chainlink` env build SUCCESS.
+- OPEN QUESTION for user: confirm physical spool order matches the table
+  (are customs appended after the full standard 52, with the corrective
+  '-'/'$' flaps at their standard positions 41/42?).  Labels PVV42..53 on
+  the printed flaps left this ambiguous.  Index-based proto control works
+  regardless; only character-based text mapping depends on it.
+- Flashing note: first 62-flap boot logs "Invalid config - stored
+  num_flaps was 52..." and resets saved offsets — re-calibrate after.
+
+### BLE iPhone app (Part I-B) — planned
+- New pvv_plans/BLE-app-plan.md.  Key findings: Web Bluetooth does not
+  exist on iOS (browser+BLE ruled out); native app REQUIRES a Mac/Xcode
+  (decision gate B0); free Apple ID sideloads expire in 7 days.
+- Firmware side (B1) is Mac-independent: NimBLE-Arduino 1.4.x (pinned —
+  2.x needs newer core than espressif32@3.4), GATT service with
+  Text / FlapIndexes / State / Control characteristics, task slotted in
+  like MQTT/HTTP.  Bench-testable with nRF Connect before any app exists.
+- Fallback if no Mac: ESP32 SoftAP + embedded web app (never touches work
+  network; check workplace AP policy).
+
+### SocialMQTT plan critical review — appended to the plan doc
+- All plan claims verified against the repo (paths, envs, flags, PubSub
+  2.8, WiFiClientSecure.setInsecure availability on core 1.0.6, EMQX
+  free-tier quota math).  Plan architecture is sound.
+- Real gaps found: Discord Message Content privileged intent missing;
+  showString() silently skips unknown chars (bridge sanitize is
+  load-bearing; pad to module count); commands must NOT be retained
+  (stale-post replay on reboot); lowercase letters are now flap codes so
+  sanitize must uppercase BEFORE filtering (plan already did — keep);
+  HA discovery publish worth gating; bridge needs bounded queue +
+  reconnect backoff.
+
+## 2026-07-06 - 62-flap spool order confirmed; plans updated
+
+- **Model:** Claude Fable 5
+- **Commits:** none (holding push per user)
+- **Files touched:** `firmware/src/config.h`, `pvv_plans/SocialMQTT-plan.md`,
+  `pvv_plans/BLE-app-plan.md`
+
+### Changes
+- User confirmed the physical spool order: Scott's standard sequence with
+  the 10 custom flaps INSERTED after '$' (index 42):
+  indexes 43-52 = heart, joy, wink, smile, sob, kiss, heart_eyes,
+  art_1 (woodgathering), panorama (skyline), art_2 (triptych); Scott's
+  apostrophe..w continue at 53-61.  The printed labels PVV42..53 turn out
+  to be 1-BASED spool positions (PVV44 = heart = index 43).
+- config.h "Flap option 5" table reordered accordingly (TODO removed);
+  `pio run -e chainlink_pvv62` rebuilds SUCCESS.
+- BLE plan: decision gate resolved — user has an iMac (Xcode install
+  needed); native SwiftUI path is GO; added phase B2a (Xcode +
+  Hello-World provisioning de-risk).  Panel indexes corrected to 51/52.
+- SocialMQTT roadmap: code-map indexes corrected to 43-52.
+
+## 2026-07-06 - Make-folder project audit (readmes + master directory)
+
+- **Model:** Claude Fable 5
+- **Commits:** none (no repo source changes)
+- **Files touched:** none inside this repo; audit artifacts written OUTSIDE
+  the repo (see below)
+
+### Changes
+- Audited all 40 project folders under `C:\Users\phgev\Documents\Make`
+  (8 parallel agents): purpose, tech, usage, GitHub presence (RoboDad),
+  and backup freshness vs `\CHICKENCOOP\Public\Make`.
+- Wrote a `readme.md` into every project folder (37 new; `readme_audit2026.md`
+  in Chalkbot, DragonChonk, SVG2GCODE which had READMEs). No existing files
+  modified or deleted anywhere.
+- Generated master directory: `C:\Users\phgev\Documents\Make\MakeProjects_audit2026.html`
+  (searchable/filterable HTML5, 40 cards, GitHub + backup badges).
+- Note for this repo: `Make\Splitflap\readme.md` (new, OUTSIDE the git repo)
+  describes the whole Splitflap workspace incl. non-git folders
+  (MX1508_Driver, PVV_CAD, pre-fork backup) — NAS backup of those is
+  ~4 months stale (2026-03-05).
+- Key audit findings: 34 of 40 projects not on GitHub; 24 with no NAS
+  backup at all, incl. HomeMovieMigration (12.5 GB family video, no copy
+  anywhere) and Blockwall (3.3 GB); PipBoy NAS copy is MORE complete than
+  local; local `Laser` folder empty while NAS copy is the active primary.
+
+## 2026-07-06 - "Fire When Ready, Gridley" TRS-80 recreation
+
+- **Model:** Claude Fable 5
+- **Commits:** none
+- **Files touched:** none inside this repo (final state) — created briefly
+  as `pvv_misc/castle_shot/`, then moved OUTSIDE the repo to its own Make
+  project: `C:\Users\phgev\Documents\Make\FireWhenReadyGridley\`
+  (`castle_shot.bas`, `castle_shot.html`, `README.md`)
+
+### Changes
+- Located the original "CASTLE SHOT" listing ("Fire When Ready, Gridley"
+  section, pp. 212-214) in D. Lien's *User's Manual for Level 1* (1977) via
+  the archive.org scan; transcribed it from the page images (OCR text layer
+  was unreliable — corrected Z=74, FOR X=1 TO 18, 1800 NEXT Z, 1810 PRINT
+  AT 0 against the scans).
+- Built a self-contained HTML5 remake (`castle_shot.html`): simulated 64x16
+  cell / 128x48 pixel Model I screen incl. text-cell vs graphics-cell
+  SET/RESET semantics (shell punches holes through the fort; KAPOW! erased
+  by RESETs), statement-paced execution (~300 stmt/s at 1x, slider to MAX),
+  5x7 pixel font, CRT bezel/scanline styling, initials input, rerun prompt.
+- Verified headless via Node smoke test (25 assertions on end-state screen
+  model): all pass.
+- Per user request, relocated the whole folder out of this repo to
+  `Make\FireWhenReadyGridley` (standalone project); `pvv_misc/` removed.
