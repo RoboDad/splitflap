@@ -334,6 +334,23 @@ void SplitflapTask::runUpdate() {
     // TODO: handle loopback failures
 #endif
 
+#ifdef PVV_DIAGNOSTICS
+    // Log every home-sensor blip with the raw step at which it arrived.
+    // Expected arrival is 0 mod STEPS_PER_REVOLUTION; positive error = late =
+    // steps lost since the last resync (re-home or startup).
+    for (uint8_t i = 0; i < NUM_MODULES; i++) {
+        if (modules[i]->diag_home_sample_count != diag_last_home_sample_[i]) {
+            diag_last_home_sample_[i] = modules[i]->diag_home_sample_count;
+            uint16_t arrival = modules[i]->diag_home_arrival_step;
+            int16_t err = (arrival >= STEPS_PER_REVOLUTION / 2) ? (int16_t)(arrival - STEPS_PER_REVOLUTION) : (int16_t)arrival;
+            char buffer[140] = {};
+            snprintf(buffer, sizeof(buffer), "DIAG: m%u home blip at raw step %u (%+d steps; + = late/lost steps) missed=%u unexpected=%u",
+                    i, arrival, err, modules[i]->count_missed_home, modules[i]->count_unexpected_home);
+            log(buffer);
+        }
+    }
+#endif
+
     updateStateCache();
 }
 

@@ -173,6 +173,11 @@ class SplitflapTask : public Task<SplitflapTask> {
         bool loopback_all_ok_ = false;
 #endif
 
+#ifdef PVV_DIAGNOSTICS
+        // Last-seen diag_home_sample_count per module, to detect new samples
+        uint8_t diag_last_home_sample_[NUM_MODULES] = {};
+#endif
+
         // Cached state. Protected by state_semaphore_
         SplitflapState state_cache_;
         void updateStateCache();

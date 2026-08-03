@@ -2,3 +2,9 @@ Pillow>=10.0
 pillow-heif>=0.18
 resvg-py>=0.3
 emoji>=2.0
+
+# flap_tester (serial proto protocol via software/chainlink)
+pyserial>=3.5
+cobs>=1.2
+six>=1.16
+protobuf==3.20.*  # must stay 3.20.x: the checked-in proto_gen/*_pb2.py use the pre-4.x codegen API

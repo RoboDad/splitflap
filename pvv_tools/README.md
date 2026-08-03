@@ -708,6 +708,72 @@ output/
 
 ---
 
+## flap_tester (separate tool)
+
+`pvv_tools/flap_tester.py` is a hardware test driver for assembled modules,
+unrelated to the print pipeline above.  It commands flaps **by index** over
+the serial proto protocol (via `software/chainlink/splitflap_proto.py`), so
+it can exercise the full 62-flap set including the lowercase custom/color
+codes that the web app's text input uppercases away.
+
+```powershell
+python -m pvv_tools.flap_tester tour  --port COM5 --dwell 1.5 --confirm  # every flap, slow, record what you see
+python -m pvv_tools.flap_tester seq   --port COM5 --chars "$hjnsbkedct"  # explicit case-sensitive sequence
+python -m pvv_tools.flap_tester jumps --port COM5 --count 40 --seed 1    # random long jumps (dynamic stress)
+python -m pvv_tools.flap_tester spin  --port COM5 --revs 10              # forced full revolutions (home drift)
+python -m pvv_tools.flap_tester monitor --port COM5                      # passive state/log watcher
+```
+
+Any change to the module's missed/unexpected-home counters is reported the
+moment it happens, tagged with the move in progress.  `--confirm` prompts
+after each flap so operator-observed mismatches are collected into the end
+summary.  Close the PlatformIO serial monitor and the web app first — only
+one program can hold the COM port.
+
+Pair it with the **`chainlink_pvv62_diag`** firmware build
+(`pio run -e chainlink_pvv62_diag -t upload`), which logs every home-sensor
+blip as `DIAG: m0 home blip at raw step N (+E steps; + = late/lost steps)`
+and widens the home error margin from ¼ flap to 2 flaps so drift is
+*measured* across revolutions instead of being silently corrected by a
+re-home every pass.  Positive step error growing across revolutions =
+steps being lost mechanically; a constant offset = harmless
+calibration/reference lag.  Between two home crossings the drum travels
+exactly one revolution (all moves are forward), so successive DIAG deltas
+read directly as steps-lost-per-rev.  The diag build intentionally degrades
+display accuracy — reflash `chainlink_pvv62` for normal use.
+
+### Per-module acceptance protocol (62-flap builds)
+
+Findings from module 1 bring-up (2026-08-02, see `docs/SESSION_LOG.md`):
+the 62-flap spool loses steps at stock top speed (torque margin, not
+inertia — worst at speed, zero when slow), and margins measured on a COLD
+motor overstate reality (a clean 10-rev spin at full speed degraded to
+8-16 steps/rev lost once warm).  Firmware knobs, set in `platformio.ini`:
+
+- `PVV_MAX_ACCEL_STEP` (1..72, 72 = stock top speed) — caps peak velocity
+  only; the acceleration ramp and stopping math are untouched.
+  **36 (~445 steps/s) is the validated ship value** — warm spin and warm
+  jumps both show flat +1..+7 arrivals, zero missed home.
+- `PVV_HOME_ERROR_MARGIN_STEPS` — home window override.  Measure with the
+  diag build FIRST: if arrivals accumulate (real loss), keep the default
+  8-step window (it is the self-correction mechanism); only widen for a
+  proven constant detection offset.
+
+Per-module acceptance (~10 min, diag build):
+
+1. `spin --revs 10` cold — constant small offset expected; any staircase
+   means drag (check flap contact surface at the window; PLA-CF abrades).
+2. `jumps --count 40 --seed 1` warm (after a few minutes of motion) —
+   arrivals must stay flat; this is the go/no-go.
+3. `tour --confirm` — operator-verified full character set.
+4. Reflash `chainlink_pvv62` for service.
+
+Dependencies (in `requirements.txt`): pyserial, cobs, six,
+protobuf 3.20.x (pinned — the checked-in `proto_gen/*_pb2.py` predate the
+protobuf 4.x codegen API).
+
+---
+
 ## Details
 
 Programmer-facing notes on internals.  Read this if you intend to modify

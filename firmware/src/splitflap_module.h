@@ -39,7 +39,23 @@
 
 #if HOME_CALIBRATION_ENABLED
 // The number of steps in either direction that's acceptable error for the home sensor
+#ifdef PVV_DIAGNOSTICS
+// Diagnostics build: widen the acceptable home window to +/-2 flaps so a
+// late/early home blip is measured and logged over multiple revolutions
+// instead of triggering a corrective re-home at +/-1/4 flap. Display accuracy
+// is intentionally degraded (position error may grow to ~2 flaps before a
+// re-home fires) — measurement builds only, never for normal use.
+#define HOME_ERROR_MARGIN_STEPS (_ROUGH_STEPS_PER_FLAP * 2)
+#elif defined(PVV_HOME_ERROR_MARGIN_STEPS)
+// PVV: explicit home window override (in steps). The 62-flap stock margin is
+// _ROUGH_STEPS_PER_FLAP/4 = 8 steps, but the blip detection lag at cruise
+// speed sits near that edge, causing benign-but-frequent re-homes on wrap
+// moves. Keep below ~half a flap (16 steps at 62 flaps) so genuine slips
+// are still caught before they become visible display errors.
+#define HOME_ERROR_MARGIN_STEPS (PVV_HOME_ERROR_MARGIN_STEPS)
+#else
 #define HOME_ERROR_MARGIN_STEPS (_ROUGH_STEPS_PER_FLAP / 4)
+#endif
 
 // After finding the home position, how long to wait before considering another home blip to be an unexpected error
 #define UNEXPECTED_HOME_START_BUFFER_STEPS (_ROUGH_STEPS_PER_FLAP * 5)
@@ -129,6 +145,16 @@ class SplitflapModule {
   
   uint8_t count_unexpected_home = 0;
   uint8_t count_missed_home = 0;
+
+#ifdef PVV_DIAGNOSTICS
+  // Raw current_step at the most recent home-sensor rising edge seen while in
+  // NORMAL state. Expected arrival is 0 mod STEPS_PER_REVOLUTION; a small
+  // positive value = blip arrived late = steps lost since the last resync.
+  // diag_home_sample_count is a rolling counter so SplitflapTask can detect
+  // and log new samples.
+  uint16_t diag_home_arrival_step = 0;
+  uint8_t diag_home_sample_count = 0;
+#endif
 };
 
 
@@ -282,6 +308,12 @@ inline void SplitflapModule::Update() {
             bool reset_to_home = false;
 #if HOME_CALIBRATION_ENABLED
             bool found_home = CheckSensor();
+#ifdef PVV_DIAGNOSTICS
+            if (found_home) {
+                diag_home_arrival_step = current_step;
+                diag_home_sample_count++;
+            }
+#endif
             if (home_state == IGNORE) {
 #if VERBOSE_LOGGING
                 if (found_home) {
@@ -341,6 +373,15 @@ inline void SplitflapModule::Update() {
                 } else {
                     target_accel_step = delta_steps;
                 }
+#ifdef PVV_MAX_ACCEL_STEP
+                // PVV: cap top speed (1..72; 72 = stock). The 62-flap spool
+                // has more inertia/drag than stock and loses steps at the
+                // stock top speed; lower this until missed_home stays 0,
+                // then back off upward for margin.
+                if (target_accel_step > PVV_MAX_ACCEL_STEP) {
+                    target_accel_step = PVV_MAX_ACCEL_STEP;
+                }
+#endif
             }
 #if HOME_CALIBRATION_ENABLED
         } else if (state == LOOK_FOR_HOME) {

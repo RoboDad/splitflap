@@ -875,3 +875,129 @@ at the gap boundary and discarded the gap strip.
   model): all pass.
 - Per user request, relocated the whole folder out of this repo to
   `Make\FireWhenReadyGridley` (standalone project); `pvv_misc/` removed.
+
+## 2026-08-02 - 62-flap module bring-up debugging + PVV_DIAGNOSTICS + flap_tester
+
+- **Model:** Claude Fable 5
+- **Commits:** "firmware+tools: 62-flap bring-up — home diagnostics, speed cap, flap_tester"
+- **Files touched:** `firmware/src/splitflap_module.h`,
+  `firmware/esp32/core/splitflap_task.{h,cpp}`, `platformio.ini`,
+  `pvv_tools/flap_tester.py` (new), `pvv_tools/requirements.txt`,
+  `pvv_tools/README.md`
+
+### Debugging session (single 62-flap module on Chainlink port A)
+- Alternating `Loopback ERROR!`/`Loopback is ok!` on first boot → traced to
+  transition-only logging in `splitflap_task.cpp`; root cause was a loose
+  3.3V supply wire (fixed by user).
+- Calibration via the web configurator kept landing off; symptoms evolved:
+  constant +1, then index-dependent +1 (A/H/O ok, P/Y/7 show +1), with the
+  "breaking point" unstable (P→Q one day, N→O the next) and **two flaps
+  dropping on a single-pitch move** at the breakpoint.
+- `Missed home` increments on every pass of home → home blip arrives >8
+  steps LATE each revolution (margin is `_ROUGH_STEPS_PER_FLAP/4` = 8 steps
+  at 62 flaps). Late (not early) rules out the genuine-28BYJ gear ratio
+  (63.684:1 would arrive early); user's dissected motor gear count
+  ((9·11·9·8)/(32·22·27·24)) is exactly 1/64 → 2048 steps/rev is correct.
+  Working hypothesis: **mechanical step loss** (drag/snag), amplified by the
+  62-flap pitch being only ~33 steps and thinner flap retention margins.
+  Slow tour A–Z, 1–9 showed no errors (but couldn't test lowercase custom
+  flaps — web app uppercases input) → points at dynamic loss at speed.
+
+### Changes
+- **`PVV_DIAGNOSTICS` firmware define** (new): `SplitflapModule` records the
+  raw `current_step` at every home-sensor rising edge (NORMAL state) +
+  rolling sample counter; `SplitflapTask::runUpdate` logs each sample as
+  `DIAG: m<i> home blip at raw step N (+E steps; + = late/lost steps)
+  missed=X unexpected=Y`. Home error margin widened from 1/4 flap to 2 flaps
+  under the define so drift is measured across revs instead of being
+  corrected by a re-home every pass (display accuracy intentionally
+  degraded; measurement builds only).
+- **`[env:chainlink_pvv62_diag]`** added to platformio.ini (pvv62 flags +
+  `-DPVV_DIAGNOSTICS`; flags duplicated — keep in sync). Both pvv62 envs
+  build clean.
+- **`pvv_tools/flap_tester.py`** (new): index-based controlled-sequence
+  tester over the serial proto protocol (imports
+  `software/chainlink/splitflap_proto.py`). Modes: `tour` (every flap,
+  optional `--confirm` operator verification), `seq` (case-sensitive char
+  sequence → can test lowercase customs), `jumps` (random stress), `spin`
+  (forced full revolutions for home-drift measurement), `monitor`.
+  Reports missed/unexpected-home counter changes in real time tagged with
+  the in-flight move; end summary of operator mismatches + counter events.
+- **Deps**: pyserial/cobs/six/protobuf==3.20.* added to
+  `pvv_tools/requirements.txt` (protobuf pinned: checked-in
+  `proto_gen/*_pb2.py` predate protobuf 4.x codegen) and installed in
+  `.venv`. README: new `## flap_tester` section.
+
+### Addendum (same session): spin test result + speed cap
+- First `spin --revs 10` run on the diag build: **zero DIAG home-blip lines**
+  and missed_home +1 every revolution even with the widened 2-flap margin —
+  no home rising edge was detected at any point of a full-speed revolution.
+  Timing rules out a sensor fault: each rev completed in ~4.5 s total; if the
+  magnet had passed the sensor undetected, the recovery crawl (221 steps/s)
+  would have needed ~9 s per rev to come back around. The drum is genuinely
+  arriving >2 flaps late per full-speed revolution and the recovery crawl
+  (during which no loss occurs) finds home just behind it.
+- Conclusion: large step loss at stock top speed (623 steps/s), zero loss at
+  low speed — torque margin exceeded by the 62-flap spool (larger radius,
+  more mass, more flap drag). Consistent with the clean slow tour (single
+  33-step moves never exceed ~accel step 16 of the 72-step ramp).
+- Added `PVV_MAX_ACCEL_STEP` top-speed cap in `SplitflapModule::Update`
+  (clamps target accel step; 72 = stock) and set `-DPVV_MAX_ACCEL_STEP=36`
+  (~70% speed) in both pvv62 envs. Tune upward until missed_home returns,
+  then back off.
+- **Confirmed:** with PVV_MAX_ACCEL_STEP=36 (~445 steps/s), spin x10 shows
+  the home blip arriving at +2/+3 steps every revolution, constant, no
+  accumulation, missed=0. At stock speed (623 steps/s) the same test lost
+  ~70-150 steps/rev. Step loss is purely a top-speed torque-margin issue.
+  Next: tune the cap upward (48, 56...) until missed_home returns, back
+  off, verify with jumps stress test, recalibrate, reflash chainlink_pvv62.
+- **Mechanical fix (user):** sanded smooth the flap-drag surface at the top
+  of the window, loosened the bearing-nub fit, and relieved the chassis
+  locator pins for alignment compliance. Result at FULL stock speed
+  (PVV_MAX_ACCEL_STEP=72 equivalent): +6 steps constant, all 10 revs,
+  missed=0 — zero step loss. Speed-loss table for the record:
+  72→70-150/rev, 54→35-50/rev, 45→4-8/rev (in 4-step electrical-cycle
+  quanta), 36→0 ... all pre-fix; post-fix 72→0. Root cause was flap drag
+  at the window release surface / misalignment binding, not the spool
+  mass per se.
+- Note: constant home-blip offset grows with speed (+2 @ 445 st/s, +6 @
+  623 st/s) — systematic detection lag, harmless in the diag build, but
+  +6 sits close to the production build's 8-step home margin. Consider a
+  modest cap (e.g. 60-64) for margin, or accept occasional benign
+  re-homes.
+- Production sign-off testing (chainlink_pvv62): full 62-flap tour incl.
+  custom region — ALL CORRECT, zero operator mismatches (first end-to-end
+  validation of the custom flap set; also disproves any flap-order issue).
+  jumps x40 (seed 1): all characters correct, but missed_home ticked on
+  ~50-70% of moves crossing the home region at both cap 64 (10/40) and
+  cap 54 (15/40) — cruise-speed blip arrival rides the production 8-step
+  window edge. (Earlier "+6 at 72" spin measurement under-measured cruise
+  lag: spin crosses home during deceleration.) Benign (self-correcting
+  re-home, display never wrong) but frequent.
+- Added `PVV_HOME_ERROR_MARGIN_STEPS` override in splitflap_module.h
+  (production margin knob, keep < 16 = half flap; commented example in
+  platformio.ini). Next: measure true cruise arrival distribution with
+  diag build + `jumps` (diag margin 66 → no re-home interference), then
+  set margin (likely 12) or lower cap accordingly.
+- Diag jumps at 54 revealed the missed-home ticks were REAL accumulating
+  loss, not detection lag: arrivals staircase +8..17 steps per revolution
+  of travel (all-forward moves = exactly one rev between home crossings).
+  Home magnet located at ~flap index 49 (blips fire exactly on moves
+  sweeping that region). PVV_HOME_ERROR_MARGIN_STEPS override left in
+  code but NOT used — with real loss, the tight 8-step window is the
+  self-correction mechanism.
+- Warm spin at 54 staircases identically (8-16/rev) where the cold spin
+  at 72 (right after reassembly) was perfectly clean — warm-motor torque
+  loss (and/or PLA-CF surface re-roughening) shrank the margin over an
+  hour of testing. Lesson: cold benchmarks overstate speed headroom;
+  acceptance runs must be warm.
+- Decision: ship PVV_MAX_ACCEL_STEP=36 in both envs (loss-free even
+  pre-mechanical-fix = proven margin vs heat/wear). Revisit speed with
+  warm diag-jumps after the UHMW-tape / iglidur-insert friction
+  experiment on the next module. Acceptance protocol per module:
+  cold spin, warm jumps, tour --confirm.
+- **Final validation at PVV_MAX_ACCEL_STEP=36, warm motor:** spin x10 =
+  +3 constant, zero accumulation; jumps x40 = arrivals flat (+1..+7),
+  zero missed/unexpected across all 50 moves. Ship config confirmed under
+  adverse (warm) conditions; both envs set to 36. Module 1 complete:
+  calibrated, all 62 flaps verified, speed chosen from warm data.
