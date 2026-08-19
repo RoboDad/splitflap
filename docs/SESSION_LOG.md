@@ -1242,3 +1242,12 @@ at the gap boundary and discarded the gap strip.
   state. Fleet build sheet: capsule-relief spool (0.24mm), no window
   tape, firm flap seating, module_test.bat acceptance (tour on
   production fw), cap 64.
+- flap_tester: added `play` mode — plays a test string char by char
+  (positional arg, case-sensitive), settable --dwell, --loops (0 =
+  forever), and repeated characters force a full revolution like the
+  real display. Hands-off playback / soak testing (also useful for
+  counting bedding-transient episodes). README updated.
+- play mode: echo received string length/content up front (PowerShell
+  double-quote interpolation silently truncates strings containing $ —
+  user hit this with play "A$B..."); README examples switched to
+  single quotes with a quoting note.

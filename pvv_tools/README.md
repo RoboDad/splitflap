@@ -718,12 +718,18 @@ codes that the web app's text input uppercases away.
 
 ```powershell
 python -m pvv_tools.flap_tester tour  --port COM5 --dwell 1.5 --confirm  # every flap, slow, record what you see
-python -m pvv_tools.flap_tester seq   --port COM5 --chars "$hjnsbkedct"  # explicit case-sensitive sequence
+python -m pvv_tools.flap_tester seq   --port COM5 --chars '$hjnsbkedct'  # explicit case-sensitive sequence
 python -m pvv_tools.flap_tester jumps --port COM5 --count 40 --seed 1    # random long jumps (dynamic stress)
 python -m pvv_tools.flap_tester spin  --port COM5 --revs 10              # forced full revolutions (home drift)
+python -m pvv_tools.flap_tester play 'HELLO WORLD' --port COM5 --dwell 2 # play a string; --loops N (0 = forever)
 python -m pvv_tools.flap_tester sector --port COM5                       # A/B: is step loss from one flap sector? (diag fw)
 python -m pvv_tools.flap_tester monitor --port COM5                      # passive state/log watcher
 ```
+
+**PowerShell quoting**: use **single quotes** around strings containing `$`
+(`'$hjnsbkedct'`, `'A$B'`) — in double quotes PowerShell interpolates
+`$name` as a variable and silently truncates the string. (In `cmd`, double
+quotes are fine.)
 
 **`sector`** answers "are the missed steps caused by one region of the
 spool?" (e.g. the stiffer/heavier UV-printed custom flaps at 42–53, the

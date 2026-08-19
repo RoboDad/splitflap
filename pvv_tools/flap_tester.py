@@ -318,6 +318,14 @@ def main():
     p_spin.add_argument('--revs', type=int, default=10, help='Number of revolutions (default 10)')
     p_spin.add_argument('--flap', type=int, default=0, help='Flap index to return to each rev (default 0)')
 
+    p_play = sub.add_parser('play', help='Play a test string char by char (hands-off; loops; '
+                                         'repeated chars force a full revolution)')
+    p_play.add_argument('text', help='String to play, case-sensitive; every char must be in the flap set')
+    p_play.add_argument('--dwell', type=float, default=2.0,
+                        help='Seconds to hold each character (default 2.0)')
+    p_play.add_argument('--loops', type=int, default=1,
+                        help='Repeats of the whole string; 0 = loop forever (Ctrl+C to stop)')
+
     p_sector = sub.add_parser(
         'sector',
         help='A/B test: is per-rev step loss concentrated in one flap sector? '
@@ -339,7 +347,7 @@ def main():
 
     sub.add_parser('monitor', help='Connect and print state changes + firmware logs')
 
-    for p in (p_tour, p_seq, p_jumps, p_spin, p_sector, sub.choices['monitor']):
+    for p in (p_tour, p_seq, p_jumps, p_spin, p_play, p_sector, sub.choices['monitor']):
         add_common_args(p, suppress_defaults=True)
 
     args = parser.parse_args()
@@ -387,6 +395,32 @@ def main():
                     run_step(watch, alphabet, index, args.dwell, args.confirm, mismatches)
                     current = index
                     moves += 1
+
+            elif args.mode == 'play':
+                # Echo what actually arrived: PowerShell interpolates $... in
+                # double-quoted strings, silently truncating the text (use
+                # single quotes there).
+                print(f'Playing {len(args.text)} chars: {args.text!r}')
+                if '$' not in args.text and len(args.text) <= 2:
+                    print("  (hint: if your string looked longer, your shell may have eaten it —"
+                          " in PowerShell use single quotes: play 'A$B...')")
+                for c in args.text:
+                    if c not in alphabet:
+                        parser.error(f'Character {c!r} is not in the flap set {"".join(alphabet)!r}')
+                loop = 0
+                while args.loops == 0 or loop < args.loops:
+                    loop += 1
+                    label = f'--- Play pass {loop}' + ('' if args.loops else ' (looping forever, Ctrl+C to stop)') + ' ---'
+                    print(label)
+                    prev_index = None
+                    for c in args.text:
+                        index = alphabet.index(c)
+                        # Repeated character: force a full revolution, like the
+                        # real display does, instead of standing still.
+                        run_step(watch, alphabet, index, args.dwell, False, mismatches,
+                                 force=(index == prev_index))
+                        moves += 1
+                        prev_index = index
 
             elif args.mode == 'sector':
                 if not (0 <= args.suspect_start < args.suspect_end < num_flaps
