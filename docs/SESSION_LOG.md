@@ -1197,3 +1197,48 @@ at the gap boundary and discarded the gap strip.
   printed-card stack. Spool design is now the production design for the
   remaining 23 modules. Pending: warm soak + warm jumps to re-qualify
   the speed cap (tax removed -> 54 or higher may now hold warm).
+- module_test on new spool: cold-ish spin flat 3 revs then 4-8/rev
+  staircase; warm jumps ~5-8/rev at cap 54 — capsule fix removed the
+  stacking tax (0.7/rev truly cold) but a smaller thermally-sensitive
+  residual remains at 54 (likely per-flap flip energy of stiffer
+  cards). Tour showed off-by-1 on some flaps — artifact of running the
+  tour on the DIAG build (widened window deliberately lets ~2 flaps of
+  drift display); protocol fixed: module_test.bat now offers the
+  production flash BEFORE the tour so step 4 validates service
+  behavior. Next: warm bisection with new spool (try 45; pre-capsule
+  45 was 4-8/rev, expect ~0 now) to pick the production cap.
+- BREAKTHROUGH: removed the UHMW tape (0.125mm thick — installed during
+  the early sliding-friction hypothesis) and raised cap to 72 (full
+  stock speed): sector run = 0.0 / 0.0 steps/rev, arrivals flat +3/+5,
+  zero ticks. The tape was consuming 0.125mm of exactly the clearance
+  the 0.24mm capsule relief added — mechanism is CLEARANCE, not
+  friction, and the tape was net harmful. Earlier "residual 4-8/rev at
+  54" was measured WITH tape and may have been entirely tape. Build
+  rule updated: NO tape/liner on the window contact surface; the
+  capsule-relief spool alone does the job. Pending final: warm soak +
+  warm jumps at 72, production-firmware tour, then pick final cap
+  (72 if warm is spotless, 64 for margin otherwise).
+- Warm jumps at 72 (no tape, capsule spool): arrivals flat ~0 for 7
+  crossings, ONE isolated ~15-step transient, then flat +12 for 11 more
+  crossings; zero counter ticks, all characters correct. No sustained
+  loss warm at full stock speed — module 1 is qualified for 72 with a
+  rare benign self-correcting hiccup, or 64 with margin. Recommendation:
+  fleet ships at 64. Module-1 debugging arc COMPLETE. Final root-cause
+  list: loose 3.3V logic wire; misseated flap(s) at 44-45; printed-card
+  stack clearance (fixed: 0.24mm capsule relief + NO tape on window
+  contact); 0.125mm UHMW tape itself (clearance thief from the disproven
+  friction hypothesis). Build sheet for modules 2-24: capsule-relief
+  spool, no window tape, firm flap seating, warm acceptance protocol
+  (module_test.bat), cap 64.
+- Post-64-reflash: one more ~21-step transient episode during a
+  suspect-SLOW phase (i.e. NOT the printed-card mechanism), then two
+  consecutive perfect sector runs (32+ clean warm revs). Episodes
+  attributed tentatively to fresh-spool bedding (as-printed capsule
+  holes polishing in); benign self-correcting re-home on production
+  margin; monitor rate over time with occasional long spins.
+- **MODULE 1 ACCEPTED**: full protocol pass on production firmware at
+  PVV_MAX_ACCEL_STEP=64 — tour 62/62 zero mismatches, zero counter
+  events. Both envs at 64; platformio.ini cap comment updated to final
+  state. Fleet build sheet: capsule-relief spool (0.24mm), no window
+  tape, firm flap seating, module_test.bat acceptance (tour on
+  production fw), cap 64.

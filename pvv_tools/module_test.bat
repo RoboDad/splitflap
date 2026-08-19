@@ -81,20 +81,32 @@ pause
 echo.
 echo ============================================================
 echo  STEP 4 of 4: FULL CHARACTER TOUR  (operator confirm)
+echo  Run this on PRODUCTION firmware: the diag build's widened home
+echo  window deliberately lets up to ~2 flaps of accumulated drift
+echo  show on the display, which reads as bogus off-by-1 mismatches.
+echo  Production firmware self-corrects every revolution.
+echo ============================================================
+choice /C YN /M "Flash production firmware (chainlink_pvv62) before the tour"
+if errorlevel 2 goto tour
+"%PIO%" run -e chainlink_pvv62 -t upload
+if errorlevel 1 (
+    echo ERROR: production firmware flash failed.
+    popd
+    exit /b 1
+)
+
+:tour
+echo.
 echo  At each flap: Enter = correct, or type the char actually shown.
 echo  PASS: zero mismatches in the end summary.
-echo ============================================================
 pause
 "%PY%" -m pvv_tools.flap_tester tour --port %PORT% --module %MODULE% --dwell 1.5 --confirm
 
 echo.
 echo ============================================================
-echo  Protocol complete. If all four steps passed, flash the
-echo  production firmware for service.
+echo  Protocol complete. Module is on production firmware (if the
+echo  step-4 flash was accepted) and ready for service.
 echo ============================================================
-choice /C YN /M "Flash production firmware (chainlink_pvv62) now"
-if errorlevel 2 goto done
-"%PIO%" run -e chainlink_pvv62 -t upload
 
 :done
 popd
