@@ -787,6 +787,7 @@ fit_3dprint_28byj48_mount_outer_radius = 0.125;
 fit_3dprint_motor_surround             = 0.06;
 fit_3dprint_axel_nub_radius            = -0.025; // interference fit
 fit_3dprint_locator_pin_radius         = 0.05;
+fit_3dprint_locator_pin_radius2        = -0.025; // Hack locator pin fitment adjustment made only to the left side panel (male locator pin).
 fit_3dprint_spool_alignment_pin        = 0.04;
 fit_3dprint_axel_pin_rad_gap           = -0.05; // interference fit
 fit_3dprint_tower_pocket_expand_by     = 0.1;
@@ -836,15 +837,18 @@ m3_nylock_nut_height = 4.0;             // Total height including nylon insert
 m3_nylock_nut_nylon_height = 1.5;       // Height of nylon insert portion
 m3_nylock_nut_hole_diameter = 3.0;      // Through hole diameter
 
-module m3_flathead_hole(depth)
+fit_enclosure_screw_rad_oversize = 0.1;
+
+module m3_flathead_hole(depth, rad_oversize = 0)
 {
 	union()
 	{
-		cylinder(h=depth, r=m3_thru_hole_rad, center=false, $fn=30);
+		cylinder(h=depth, r=m3_thru_hole_rad + rad_oversize, center=false, $fn=30);
+		head_rad = m3_flathead_rad + rad_oversize;
 		translate([0, 0, -eps])
-			cylinder(h=m3_flathead_counterbore_depth + 2.0*eps, r=m3_flathead_rad, center=false, $fn=30);
+			cylinder(h=m3_flathead_counterbore_depth + 2.0*eps, r=head_rad, center=false, $fn=30);
 		translate([0, 0, m3_flathead_counterbore_depth])
-			cylinder(h=m3_flathead_taper_depth, r1=m3_flathead_rad, r2=0, center=false, $fn=30);
+			cylinder(h=m3_flathead_taper_depth, r1=head_rad, r2=0, center=false, $fn=30);
 	}
 }
 
@@ -929,7 +933,38 @@ module m4_flathead_hole(depth)
 
 
 
-per_flap_radial_elongation = 0.015; // This is how much to elongate the flap holes radially to create a capsule shape when num_flaps > 58.  Empirically determined.
+// How much to elongate the flap holes radially (inward, toward the axis) to
+// create a capsule shape when num_flaps > 58, per flap over 58.
+//
+// History:
+// - 0.015 (original shot-in-the-dark value): total elongation at 62 flaps was
+//   0.015 * 4 = 0.06mm — turned out to be ~4x too small, see below.
+// - 0.06 (2026-08-16): sized from module-1 step-loss testing (full narrative
+//   in docs/SESSION_LOG.md, 2026-08-16 entries). Measured facts:
+//     * UV-printed flap = 0.88mm vs 0.80mm unprinted (+0.08mm per card).
+//     * 2-3 cards overlap in the retention stack near the hinge, so a run of
+//       consecutive printed cards adds 0.16-0.24mm of parasitic stack
+//       thickness at the near-tangent zone; the stack bends the front card
+//       against the window lip and the motor loses steps in 4-step pole-slip
+//       quanta (~1.2 steps/rev per consecutive printed pair at accel cap 54,
+//       warm). Spaced-out printed cards cost ~nothing (adjacency-controlled
+//       A/B test).
+//   Total elongation at 62 flaps is now 0.06 * 4 = 0.24mm, matched to the
+//   3-printed-card stack excess. Verify after spool swap with:
+//     python -m pvv_tools.flap_tester sector --port COM5 --control-first
+//   (target: suspect-slow ~= control-slow ~= 0; pre-change baseline was
+//   10.4 steps/rev with 10 contiguous printed flaps at cruise, warm.)
+//   Side effect to eyeball on first assembly: hanging flap can sit up to
+//   0.24mm lower/deeper at display position — expected to be visually
+//   negligible.
+//
+// NOTE (2026-08-16): per_flap_extra_barrel_clearance deliberately left
+// unchanged in this iteration — shrinking the barrel ripples into the motor
+// surround radius and the motor alignment jig (more reprints), and the
+// bottom of the flap stack currently shows clearance to the barrel anyway.
+// Revisit only if the larger capsules make the stack bottom out on the
+// barrel.
+per_flap_radial_elongation = 0.06;
 flap_hole_capsule_elongation = (num_flaps > 58) ? (per_flap_radial_elongation * (num_flaps - 58)) : 0.0;
 
 per_flap_extra_barrel_clearance = 0.1;
@@ -1569,7 +1604,7 @@ module pvv_frame_left_side_panel(use_B_mounting_pattern = false)
 				{
 					for (pos = m3_flathead_hole_positions) 
 					{
-						translate([pos[0], pos[1], 0]) m3_flathead_hole(6);
+						translate([pos[0], pos[1], 0]) m3_flathead_hole(depth=6, rad_oversize = fit_enclosure_screw_rad_oversize);
 					}
 				}
 
@@ -1676,7 +1711,7 @@ module pvv_frame_left_side_panel(use_B_mounting_pattern = false)
 				pos_y = pos[1];
 				translate([pos_x, pos_y, frame_left_sidewall_thickness])
 				{
-					cylinder_rounded(r = locator_pin_rad, h = locator_pin_depth, cap_r1=0, cap_r2=1, cr_fn=15, center = false, $fn = 30);
+					cylinder_rounded(r = locator_pin_rad + fit_3dprint_locator_pin_radius2, h = locator_pin_depth, cap_r1=0, cap_r2=1.0 + fit_3dprint_locator_pin_radius2, cr_fn=15, center = false, $fn = 30);
 				}
 			}
 
@@ -1892,7 +1927,7 @@ module pvv_frame_right_side_panel()
 			{
 				for (pos = m3_flathead_hole_positions) 
 				{
-					translate([pos[0], pos[1], -eps]) cylinder(h=10, r=m3_thru_hole_rad, center=true, $fn=30);
+					translate([pos[0], pos[1], -eps]) cylinder(h=10, r=m3_thru_hole_rad + fit_enclosure_screw_rad_oversize, center=true, $fn=30);
 				}
 			}
 
@@ -2092,7 +2127,7 @@ module motor_flange_alignment_jig()
 		{
 			rotate([0, 0, i * 90]) translate([motor_coupler_hole_pattern_radius, 0, 0])
 			{
-				if (i & 1)
+				if (i % 2 == 1) // was `i & 1` — OpenSCAD has no bitwise &, which made the whole file unparseable (fixed 2026-08-16)
 				{
 					cylinder(h=100, r=m3_cap_screw_head_diameter/2 + 0.1, center=true, $fn=30);
 				}
@@ -2224,15 +2259,12 @@ module print_plate(use_B_mounting_pattern = false)
 	}
 } 
 
-//print_plate(use_B_mounting_pattern = true);
-
-
 		//front_panel_for_left_side_panel();
 		//front_panel_for_right_side_panel();
 
 
 //jig_cutaway();
-apply_filament_shrinkage_compensation() motor_flange_alignment_jig();
+//apply_filament_shrinkage_compensation() motor_flange_alignment_jig();
 
 // ---- FLAP_PRINTER parameter export (parsed by pvv_tools/flap_printer) ----
 // Jig and mat parameters are now defined in the job JSON config (jig section)
@@ -2260,4 +2292,5 @@ module flap_lineup()
 	}
 }
 
+print_plate(use_B_mounting_pattern = true);
 

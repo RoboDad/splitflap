@@ -1001,3 +1001,199 @@ at the gap boundary and discarded the gap strip.
   zero missed/unexpected across all 50 moves. Ship config confirmed under
   adverse (warm) conditions; both envs set to 36. Module 1 complete:
   calibrated, all 62 flaps verified, speed chosen from warm data.
+
+## 2026-08-16 - module_test.bat acceptance-protocol runner
+
+- **Model:** Claude Fable 5
+- **Commits:** (pending)
+- **Files touched:** `pvv_tools/module_test.bat` (new), `pvv_tools/README.md`,
+  `docs/SESSION_LOG.md`
+
+### Changes
+- `pvv_tools/module_test.bat [COMport] [moduleIndex]` (defaults COM5, 0):
+  runs the four-step module acceptance protocol — cold spin, ~3 min
+  warm-up, warm jumps (go/no-go, seed 1), tour --confirm — with pass/fail
+  criteria echoed before each step. Offers chainlink_pvv62_diag flash up
+  front and chainlink_pvv62 (production) flash at the end. Calls
+  `.venv\Scripts\python.exe` directly, so it works from a plain cmd
+  prompt without venv activation (the failure mode that prompted it).
+- README acceptance-protocol section updated to reference the batch file.
+- Context: user is starting the UHMW-tape friction experiment on module 2
+  (baseline warm-jumps target to beat: 8-16 steps/rev lost at cap 54).
+
+### Addendum 2026-08-16: tape result + sector-isolation test
+- UHMW tape on the window edge, tested at cap 54 (diag build): still
+  ~12-16 steps/rev lost, cold AND warm (cold/warm gap gone). Go/no-go
+  still fails at 54; 36 remains the ship value. Tape verdict inconclusive
+  without a same-module/same-conditions no-tape baseline.
+- User observation: losses correlate with passing the UV-printed custom
+  flap sector (42-53), and those flaps sound different — likely stiffer
+  (3 rigid white layers + CMYK) and heavier, dragging harder at release.
+  (Home magnet sits ~index 49, inside that sector.)
+- Added `sector` mode to flap_tester: A/B speed-placement test. Each
+  SUSPECT-SLOW cycle single-steps the suspect sector (single-flap moves
+  stay low on the accel ramp) and cruises the rest; CONTROL-SLOW
+  single-steps an equal-width letter sector so the suspect is crossed at
+  cruise. Parses DIAG lines, discards re-home resync deltas, prints mean
+  loss/rev per phase + interpretation. Defaults: suspect 42-53, control
+  10-21, 8 cycles/phase, --control-first for thermal check. README
+  updated.
+- **Sector test result (first run): CONFIRMED — the UV-printed custom
+  sector is the step-loss culprit.** SUSPECT-SLOW (customs 42-53 crossed
+  slowly): 0.3 steps/rev (deltas 2,0,0,0,0,0; arrivals flat +5).
+  CONTROL-SLOW (customs at cruise): 9.6 steps/rev (deltas 12,12,8,8,8 —
+  4-step pole-slip quanta again). The other 50 flaps are fully clean at
+  cruise; ALL the loss comes from punching through the stiff/heavy
+  UV-printed flaps at speed. Also explains why UHMW tape barely helped:
+  the cost is bending/impact energy of stiff flaps at release, not
+  sliding friction. Pending: --control-first rerun for thermal rigor;
+  sector-bisection (e.g. 43-47 vs 48-52) to localize further; flexible-
+  white / thinner-ink-stack print experiment, scored by re-running
+  sector.
+- --control-first rerun: conclusion HOLDS with order swapped —
+  SUSPECT-SLOW (run second, warm) = 0.0 steps/rev (seven zero deltas,
+  arrival pinned +46); CONTROL-SLOW (run first) = 12.8 steps/rev
+  (12,16,8,20,8). Thermal bias ruled out. Final: 100% of step loss comes
+  from traversing the UV-printed custom flaps (42-53) at cruise speed;
+  stiffness/mass of the ink stack (3x rigid white + CMYK), not surface
+  friction. Next: sector bisection to localize within the customs;
+  flexible-white / thinner-stack reprint scored by re-running sector.
+- Bisection complete: loss localized to spool arc 43-47 (heart, joy,
+  wink, smile, sob) — slowing them: 1.7/rev; slowing 48-52 (kiss,
+  heart_eyes, art1, panorama, triptych) instead: 17.8/rev = no help.
+  IMPORTANT: this breaks the simple "UV ink stack = stiff" theory,
+  because 48 (kiss) and 49 (heart_eyes) are ALSO UV-printed emojis and
+  they're clean. Differentiator is batch or position, not "emoji vs
+  art": either the two arcs came from different print batches (check
+  PVV42-53 labels vs flap_printer batch_01/batch_02 job records) or the
+  problem is drum-local mechanics at slots 43-47 (pins/holes/eccentric
+  arc). Whole-drum loss estimate crept 9.6->17.8 across the afternoon =
+  warming trend, consistent with earlier thermal findings.
+- Boundary-hypothesis run (user's theory): slow 42-44 only ('$',heart,joy;
+  ramp shades 45-46) -> 1.7/rev vs control 9.3 — equal to protecting all
+  of 43-47. Guilty zone collapses to the ENTRY of the UV region:
+  heart(43)/joy(44), possibly wink(45). Occasional residual single
+  pole-slips (deltas 4,4,3,1). Pending: complement run 45-47 for the
+  final cut; physical comparison heart/joy vs kiss/heart_eyes (clean
+  emojis); print batch records for PVV44/45 vs PVV49/50 labels.
+- Complement run (slow 45-47): ALSO clean (1.1/rev) despite heart/joy
+  nominally at cruise — resolved by ramp shading: the slow window is
+  effectively widened ~1.6 flaps each side (decel into start, ramp-up
+  out of end). Intersecting all four runs' protection zones: every clean
+  run covers 43.4-45.6; the full-loss run (48-52) is exactly the one
+  excluding it. CONCLUSION SHARPENED: not the sector, not the boundary —
+  one or two SPECIFIC flaps, joy(44) and/or wink(45). Likely a per-flap
+  defect (ink at hinge/pin, burr, thickness) rather than class-wide ink
+  stiffness — 8 of 10 UV flaps run clean at full cruise. Next: physical
+  inspection of joy/wink vs clean neighbors; optional confirming run
+  slow 47-49 (exposes 44-45 -> predict full loss).
+- Confirming run (slow 47-49, exposing 44-45 at cruise): predicted full
+  loss, measured 14.5/rev vs control 8.8. LOCALIZATION FINAL: all step
+  loss on this module comes from joy(44) and/or wink(45) at cruise
+  speed. All other 60 flaps (incl. 8 of 10 UV customs) are clean at full
+  cruise — the UV ink stack as a class is vindicated; this is a per-flap
+  defect (inspect hinge/pin ink, burrs, seating, edge bleed vs clean
+  neighbors smile/kiss). If fixed, re-run warm jumps at 54/64/72 — the
+  speed cap may become unnecessary.
+- Spool-rotation test (user): rotated spool 90 deg on the 4-position
+  motor coupler and re-ran sector 47-49: guilty window UNMOVED (suspect-
+  slow 2.0 vs control 8.8). A shaft/coupler/bearing-phase cause would
+  have shifted the guilty window ~15.5 flaps; it didn't. Guilt follows
+  the flaps. Everything motor-side of the coupler is now exonerated.
+  Remaining suspects: the joy(44)/wink(45) flaps themselves (or their
+  slots/pins on the spool disc). Physical inspection is next.
+- Flap-rearrangement test (user): moved '.','?','-' from 39-41... i.e.
+  shifted '$',heart,joy down three slots and inserted the light flaps
+  between joy and wink. Result: loss mostly VANISHED IN BOTH PHASES
+  (control 4.3 — mostly 0-2 with one late 17; suspect 1.1) with heart/
+  joy at full cruise. Neither "guilt follows flap" nor "guilt stays at
+  slot": the rearrangement itself changed the physics. Two candidates:
+  (a) adjacency — consecutive stiff flaps interacting, broken by the
+  light-flap spacer; (b) the handling/re-seat fixed a latent defect
+  (half-seated pin/burr/interlocked pair). Caution: 5,17 deltas late in
+  control = possible warm re-emergence after the 15-min cool-down.
+  Discriminator: warm soak first, then UNDO the rearrangement — loss
+  returns => adjacency; stays clean => re-seat was the fix.
+- UNDO test: original flap order restored — loss did NOT return
+  (control 3.8, suspect 2.9, no sector specificity). VERDICT: adjacency
+  was not the mechanism; the re-seating/handling of flaps around 43-45
+  cleared a latent assembly defect (seating/burr/interlock). Original
+  9-18/rev step loss is gone at cap 54 in the original flap order.
+  Residual ~3-4/rev, declining within the run (5,5,5,5,0,0,0 pattern) —
+  possibly bedding-in after reassembly; not sector-specific. Build rule
+  for remaining 23 modules: firmly seat every flap (especially customs),
+  then run the module_test.bat acceptance protocol — this exact defect
+  class is invisible to eyes but obvious to the sector test.
+- Post-recalibration acceptance run: tour PASSES (the -2 display offset
+  from the flap surgeries is gone). Residual loss quantified: ~4-9
+  steps/rev at cap 54, similar cold and warm, 4-step quanta, 3 missed
+  ticks in 40 jumps — stable, not bedding away. Half the pre-surgery
+  loss but a clear fail at 54. DECISION: module 1 ships at
+  PVV_MAX_ACCEL_STEP=36 (all tests pass there). Residual attribution
+  (thickness/stiffness tax on UV flaps — measured +10% thickness =
+  ~+33% substrate bending stiffness — vs distributed drag) is optional
+  fleet R&D: warm sector run with suspect 42-53, and possibly a
+  0.1-0.15mm window clearance bump in PVV_splitflap_mods.scad for
+  future enclosure prints.
+- Warm full-arc sector run (suspect 42-53): residual loss is 100% in the
+  UV-printed arc — suspect-slow 0.4/rev (six zeros) vs control-slow
+  10.4/rev. UNIFIED MODEL: UV ink stack (+10% thickness => ~+33%
+  stiffness) imposes a constant drag/impact tax on the custom arc; cold
+  torque margin covers it (clean cold runs), warm margin doesn't (slips
+  appear in the arc, 4-step quanta); the 44-45 seating defect was extra
+  drag on top (slipped even cold, hence early localization there).
+  User's printed-flap suspicion vindicated for the residual.
+  Fix options: cap 36 (ships now), window-clearance bump in CAD,
+  thinner/flexible white stack on reprints. Optional: warm re-bisection
+  43-47 vs 48-52 should now split evenly if class-effect model correct.
+- Blank-substitution run (all printed flaps replaced with blanks): drum
+  runs CLEAN at 54 warm — 0.3 vs 0.3 steps/rev, no sector difference,
+  zero counter ticks. Causal proof the printed flaps carry the entire
+  residual tax. User theory: +0.08mm/flap thickness ACCUMULATES across
+  the 2-3-flap overlap stack at the retention zone — only consecutive
+  printed flaps overstuff the gap (~+10%). Discriminating experiment
+  queued: reinstall the same 4-5 printed flaps adjacent vs spaced-apart
+  (>=2 blanks between) and compare warm sector runs. If spacing wins,
+  fleet fix is FREE: redistribute customs through the character table
+  (config.h order is arbitrary) instead of contiguous-after-'$';
+  update table + physical order, recalibrate. No ink or CAD changes.
+- STACKING THEORY PROVEN (count-controlled): same 5 printed flaps —
+  spaced: 0.1/rev; clustered contiguous: 5.5/rev. With the earlier
+  10-contiguous (10.4) and all-blank (0.3) points, loss tracks the
+  number of printed-on-printed overlaps in the retention stack
+  (~1.2 steps/rev per consecutive-printed pair, warm, cap 54).
+  Mechanism: +0.08mm/card accumulates across the 2-3-card overlap in
+  the retention gap only when printed cards are consecutive. Root-cause
+  chain for module 1, final: seating defect at 44-45 (fixed by re-seat)
+  + printed-card stacking tax (design-level, applies to any contiguous
+  printed run). Fix menu: ink-free/reduced band in the card-overlap
+  zone via flap_printer's existing mask system (allows contiguity;
+  preferred), thinner white stack, interleave (~2 boundary reprints per
+  relocated custom), or cap 36 (ships today). Design rule for future
+  sets: avoid long runs of consecutive full-stack printed cards, or
+  relieve the overlap band.
+- CAD: spool stack-relief iteration 1 in PVV_splitflap_mods.scad —
+  per_flap_radial_elongation 0.015 -> 0.06 (capsule elongation at 62
+  flaps: 0.06mm -> 0.24mm, sized to the measured 3-printed-card stack
+  excess; full sizing rationale in a comment block at the definition).
+  per_flap_extra_barrel_clearance deliberately unchanged (barrel radius
+  ripples into motor surround + alignment jig = more reprints, and the
+  stack currently clears the barrel; noted in comment). Also fixed a
+  pre-existing parse-breaking bug: `if (i & 1)` -> `if (i % 2 == 1)` in
+  the motor jig module (OpenSCAD has no bitwise &; was present in HEAD
+  and made the entire file unrenderable). Full-file CSG parse check
+  passes (stable OpenSCAD). Next: print spool, transfer flaps,
+  recalibrate, warm sector run — baseline to beat: 10.4 steps/rev with
+  10 contiguous printed flaps at cruise (cap 54); target ~0.3.
+
+## 2026-08-18 - Capsule-relief spool validated
+
+- **Model:** Claude Fable 5
+- Reprinted spool with per_flap_radial_elongation=0.06 (0.24mm total
+  capsule elongation), all 10 printed flaps back in contiguous order.
+  Sector test at cap 54: control-slow (printed arc at CRUISE) 0.7
+  steps/rev vs 10.4 pre-fix; suspect-slow 1.6; no sector specificity,
+  zero counter ticks. The empirically-sized capsule relief absorbs the
+  printed-card stack. Spool design is now the production design for the
+  remaining 23 modules. Pending: warm soak + warm jumps to re-qualify
+  the speed cap (tax removed -> 54 or higher may now hold warm).

@@ -26,6 +26,7 @@ Examples (run from the repo root, venv active):
 import argparse
 import logging
 import random
+import re
 import sys
 import threading
 import time
@@ -42,6 +43,55 @@ from proto_gen import splitflap_pb2  # noqa: E402
 
 STATE_NORMAL = splitflap_pb2.SplitflapState.ModuleState.State.NORMAL
 LEGACY_ALPHABET_LEN = 40
+
+DIAG_RE = re.compile(r'DIAG: m(\d+) home blip at raw step (\d+)')
+STEPS_PER_REVOLUTION = 2048
+
+
+class DiagCollector:
+    """Collects home-blip arrival steps from the diag firmware's DIAG log
+    lines, tagged with the current test phase, so per-revolution loss can be
+    computed and attributed."""
+
+    def __init__(self, splitflap, module_index):
+        self._m = module_index
+        self._lock = threading.Lock()
+        self.samples = []  # list of (tag, signed_error_steps)
+        self.tag = None
+        splitflap.add_handler('log', self._on_log)
+
+    def _on_log(self, msg):
+        match = DIAG_RE.search(msg.msg)
+        if match and int(match.group(1)) == self._m:
+            step = int(match.group(2))
+            err = step - STEPS_PER_REVOLUTION if step >= STEPS_PER_REVOLUTION // 2 else step
+            with self._lock:
+                self.samples.append((self.tag, err))
+
+    def set_tag(self, tag):
+        with self._lock:
+            self.tag = tag
+
+    def deltas_for(self, tag):
+        """Per-revolution loss: differences between consecutive same-tag
+        samples. A delta outside [-6, 60] means a re-home resynced the
+        reference in between; those are discarded (counted separately)."""
+        with self._lock:
+            samples = list(self.samples)
+        deltas, discarded = [], 0
+        prev = None
+        for sample_tag, err in samples:
+            if sample_tag != tag:
+                prev = None
+                continue
+            if prev is not None:
+                delta = err - prev
+                if -6 <= delta <= 60:
+                    deltas.append(delta)
+                else:
+                    discarded += 1
+            prev = err
+        return deltas, discarded
 
 
 class ModuleWatch:
@@ -145,6 +195,69 @@ def run_step(watch, alphabet, index, dwell, confirm, mismatches, force=False):
             print(f'      recorded mismatch: expected {alphabet[index]!r} saw {answer!r}')
 
 
+def run_sector_phase(watch, collector, alphabet, tag, slow_start, slow_end,
+                     cycles, step_dwell):
+    """One phase of the sector-isolation test: each cycle single-steps
+    through [slow_start..slow_end] (drum never leaves the low-speed part of
+    the acceleration ramp), then makes one long cruise move back to
+    slow_start through the rest of the revolution. Net travel per cycle is
+    exactly one revolution, so consecutive DIAG blips give loss-per-rev for
+    a revolution in which ONLY the slow sector was crossed slowly."""
+    span = f'{slow_start}..{slow_end} ({alphabet[slow_start]!r}..{alphabet[slow_end]!r})'
+    print(f'--- Phase {tag}: single-stepping {span}, cruising the rest, {cycles} cycles ---')
+    watch.set_label(f'{tag}: position at {slow_start}')
+    watch.go_to(slow_start)
+    if watch.wait_settle(slow_start) is None:
+        print('  !!! TIMEOUT positioning at sector start')
+        return
+    collector.set_tag(tag)
+    for cycle in range(cycles):
+        for index in range(slow_start + 1, slow_end + 1):
+            watch.set_label(f'{tag} cycle {cycle + 1}: slow step to {index}')
+            watch.go_to(index)
+            if watch.wait_settle(index) is None:
+                print(f'  !!! TIMEOUT at slow step {describe(alphabet, index)}')
+            time.sleep(step_dwell)
+        watch.set_label(f'{tag} cycle {cycle + 1}: cruise back to {slow_start}')
+        watch.go_to(slow_start)
+        if watch.wait_settle(slow_start) is None:
+            print('  !!! TIMEOUT on cruise move')
+        print(f'  cycle {cycle + 1}/{cycles} done')
+    collector.set_tag(None)
+
+
+def summarize_sector(collector, suspect_span, control_span):
+    print()
+    print('=== Sector isolation summary (loss per revolution, steps) ===')
+    results = {}
+    for tag, span in (('SUSPECT-SLOW', suspect_span), ('CONTROL-SLOW', control_span)):
+        deltas, discarded = collector.deltas_for(tag)
+        mean = sum(deltas) / len(deltas) if deltas else float('nan')
+        results[tag] = mean
+        print(f'  {tag:13s} (slow {span}): deltas={deltas} mean={mean:.1f} '
+              f'(n={len(deltas)}, resyncs discarded={discarded})')
+    print()
+    a, b = results.get('SUSPECT-SLOW'), results.get('CONTROL-SLOW')
+    if a != a or b != b:  # NaN check
+        print('  Not enough DIAG samples — is the chainlink_pvv62_diag firmware flashed?')
+        return
+    print('  Interpretation:')
+    print('   - SUSPECT-SLOW measures loss with the suspect sector crossed SLOWLY')
+    print('     (everything else at cruise). CONTROL-SLOW crosses the suspect')
+    print('     sector at CRUISE instead.')
+    if b - a >= 4 and a <= 4:
+        print(f'   -> Loss concentrated in the suspect sector at speed '
+              f'({a:.1f} vs {b:.1f} steps/rev): the sector IS the culprit.')
+    elif abs(b - a) < 3:
+        print(f'   -> No significant difference ({a:.1f} vs {b:.1f} steps/rev): '
+              f'loss is NOT specific to the suspect sector.')
+    else:
+        print(f'   -> Partial difference ({a:.1f} vs {b:.1f} steps/rev): the '
+              f'sector contributes but is not the whole story.')
+    print('  (Thermal caveat: phases run in sequence; for a careful result,')
+    print('   re-run with --control-first and check the conclusion holds.)')
+
+
 def summarize(watch, alphabet, mismatches, moves):
     print()
     print(f'=== Summary: {moves} moves ===')
@@ -205,9 +318,28 @@ def main():
     p_spin.add_argument('--revs', type=int, default=10, help='Number of revolutions (default 10)')
     p_spin.add_argument('--flap', type=int, default=0, help='Flap index to return to each rev (default 0)')
 
+    p_sector = sub.add_parser(
+        'sector',
+        help='A/B test: is per-rev step loss concentrated in one flap sector? '
+             '(requires chainlink_pvv62_diag firmware)')
+    p_sector.add_argument('--suspect-start', type=int, default=42,
+                          help='Suspect sector first index (default 42 = $, start of customs)')
+    p_sector.add_argument('--suspect-end', type=int, default=53,
+                          help="Suspect sector last index (default 53 = ', end of customs)")
+    p_sector.add_argument('--control-start', type=int, default=10,
+                          help='Control sector first index (default 10 = J)')
+    p_sector.add_argument('--control-end', type=int, default=21,
+                          help='Control sector last index (default 21 = U)')
+    p_sector.add_argument('--cycles', type=int, default=8,
+                          help='Revolutions per phase (default 8)')
+    p_sector.add_argument('--step-dwell', type=float, default=0.15,
+                          help='Pause between slow single-flap steps (default 0.15s)')
+    p_sector.add_argument('--control-first', action='store_true',
+                          help='Run the control phase before the suspect phase (thermal check)')
+
     sub.add_parser('monitor', help='Connect and print state changes + firmware logs')
 
-    for p in (p_tour, p_seq, p_jumps, p_spin, sub.choices['monitor']):
+    for p in (p_tour, p_seq, p_jumps, p_spin, p_sector, sub.choices['monitor']):
         add_common_args(p, suppress_defaults=True)
 
     args = parser.parse_args()
@@ -255,6 +387,26 @@ def main():
                     run_step(watch, alphabet, index, args.dwell, args.confirm, mismatches)
                     current = index
                     moves += 1
+
+            elif args.mode == 'sector':
+                if not (0 <= args.suspect_start < args.suspect_end < num_flaps
+                        and 0 <= args.control_start < args.control_end < num_flaps):
+                    parser.error('sector bounds must satisfy 0 <= start < end < num_flaps')
+                collector = DiagCollector(s, args.module)
+                suspect_span = (f'{args.suspect_start}..{args.suspect_end} '
+                                f'({alphabet[args.suspect_start]!r}..{alphabet[args.suspect_end]!r})')
+                control_span = (f'{args.control_start}..{args.control_end} '
+                                f'({alphabet[args.control_start]!r}..{alphabet[args.control_end]!r})')
+                phases = [
+                    ('SUSPECT-SLOW', args.suspect_start, args.suspect_end),
+                    ('CONTROL-SLOW', args.control_start, args.control_end),
+                ]
+                if args.control_first:
+                    phases.reverse()
+                for tag, start, end in phases:
+                    run_sector_phase(watch, collector, alphabet, tag, start, end,
+                                     args.cycles, args.step_dwell)
+                summarize_sector(collector, suspect_span, control_span)
 
             elif args.mode == 'spin':
                 run_step(watch, alphabet, args.flap, 0.5, False, mismatches)

@@ -721,8 +721,22 @@ python -m pvv_tools.flap_tester tour  --port COM5 --dwell 1.5 --confirm  # every
 python -m pvv_tools.flap_tester seq   --port COM5 --chars "$hjnsbkedct"  # explicit case-sensitive sequence
 python -m pvv_tools.flap_tester jumps --port COM5 --count 40 --seed 1    # random long jumps (dynamic stress)
 python -m pvv_tools.flap_tester spin  --port COM5 --revs 10              # forced full revolutions (home drift)
+python -m pvv_tools.flap_tester sector --port COM5                       # A/B: is step loss from one flap sector? (diag fw)
 python -m pvv_tools.flap_tester monitor --port COM5                      # passive state/log watcher
 ```
+
+**`sector`** answers "are the missed steps caused by one region of the
+spool?" (e.g. the stiffer/heavier UV-printed custom flaps at 42–53, the
+default suspect).  Single-flap moves never leave the low-speed part of the
+acceleration ramp, so each SUSPECT-SLOW cycle single-steps through the
+suspect sector and cruises through the rest of the revolution; the
+CONTROL-SLOW phase single-steps an equal-width letter sector (default
+J–U) so the suspect sector is crossed at cruise instead.  It parses the
+diag firmware's DIAG lines and prints mean loss-per-rev for both phases:
+suspect-slow ≈ 0 while control-slow shows the full loss ⇒ the suspect
+sector is the culprit; roughly equal ⇒ the loss is distributed.  Requires
+`chainlink_pvv62_diag`; re-run with `--control-first` to rule out warm-up
+bias.
 
 Any change to the module's missed/unexpected-home counters is reported the
 moment it happens, tagged with the move in progress.  `--confirm` prompts
@@ -759,14 +773,18 @@ motor overstate reality (a clean 10-rev spin at full speed degraded to
   8-step window (it is the self-correction mechanism); only widen for a
   proven constant detection offset.
 
-Per-module acceptance (~10 min, diag build):
+Per-module acceptance (~10 min, diag build) — automated by
+**`pvv_tools\module_test.bat [COMport] [moduleIndex]`** (defaults COM5,
+module 0; offers the diag flash up front and the production flash at the
+end, uses the `.venv` python directly so no activation is needed):
 
 1. `spin --revs 10` cold — constant small offset expected; any staircase
    means drag (check flap contact surface at the window; PLA-CF abrades).
-2. `jumps --count 40 --seed 1` warm (after a few minutes of motion) —
-   arrivals must stay flat; this is the go/no-go.
-3. `tour --confirm` — operator-verified full character set.
-4. Reflash `chainlink_pvv62` for service.
+2. Warm-up: ~3 minutes of motion (results ignored).
+3. `jumps --count 40 --seed 1` warm — arrivals must stay flat; this is
+   the go/no-go.
+4. `tour --confirm` — operator-verified full character set.
+5. Reflash `chainlink_pvv62` for service.
 
 Dependencies (in `requirements.txt`): pyserial, cobs, six,
 protobuf 3.20.x (pinned — the checked-in `proto_gen/*_pb2.py` predate the
